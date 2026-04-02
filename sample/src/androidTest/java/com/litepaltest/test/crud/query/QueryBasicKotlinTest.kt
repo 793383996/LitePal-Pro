@@ -33,7 +33,7 @@ class QueryBasicKotlinTest : LitePalTestCase() {
         assertTrue(450 == b.pages)
         assertEquals(49.99, b.price)
         assertFalse(b.isPublished)
-        assertTrue(b.isSaved)
+        assertTrue(b.isSaved())
     }
 
     @Test
@@ -69,7 +69,7 @@ class QueryBasicKotlinTest : LitePalTestCase() {
                 assertTrue(434 == book.pages)
                 assertEquals(40.99, book.price)
                 assertTrue(book.isPublished)
-                assertTrue(book.isSaved)
+                assertTrue(book.isSaved())
                 continue
             } else if (book.id == book2.id) {
                 assertEquals(8.8f, book.area)
@@ -79,7 +79,7 @@ class QueryBasicKotlinTest : LitePalTestCase() {
                 assertTrue(411 == book.pages)
                 assertEquals(35.99, book.price)
                 assertFalse(book.isPublished)
-                assertTrue(book.isSaved)
+                assertTrue(book.isSaved())
                 continue
             }
             fail()
@@ -102,7 +102,7 @@ class QueryBasicKotlinTest : LitePalTestCase() {
             assertEquals(expectBook.isbn, realBook.isbn)
             assertEquals(expectBook.level, realBook.level)
             assertEquals(expectBook.isPublished, realBook.isPublished)
-            assertTrue(realBook.isSaved)
+            assertTrue(realBook.isSaved())
         }
     }
 
@@ -119,7 +119,7 @@ class QueryBasicKotlinTest : LitePalTestCase() {
         assertEquals(expectedFirstBook.isbn, realFirstBook.isbn)
         assertEquals(expectedFirstBook.level, realFirstBook.level)
         assertEquals(expectedFirstBook.isPublished, realFirstBook.isPublished)
-        assertTrue(realFirstBook.isSaved)
+        assertTrue(realFirstBook.isSaved())
     }
 
     @Test
@@ -135,7 +135,7 @@ class QueryBasicKotlinTest : LitePalTestCase() {
         assertEquals(expectedLastBook.isbn, realLastBook.isbn)
         assertEquals(expectedLastBook.level, realLastBook.level)
         assertEquals(expectedLastBook.isPublished, realLastBook.isPublished)
-        assertTrue(realLastBook.isSaved)
+        assertTrue(realLastBook.isSaved())
     }
 
     @Test

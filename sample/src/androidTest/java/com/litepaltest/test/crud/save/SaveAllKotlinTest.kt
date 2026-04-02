@@ -9,6 +9,7 @@ import org.junit.Test
 import org.litepal.LitePal.find
 import org.litepal.LitePal.findBySQL
 import org.litepal.LitePal.where
+import org.litepal.LitePalRuntime
 import org.litepal.extension.saveAll
 import org.litepal.util.DBUtility
 import java.util.*
@@ -31,14 +32,14 @@ class SaveAllKotlinTest {
         val cellList: MutableList<Cellphone> = ArrayList()
         for (i in 0..49) {
             val cellPhone = Cellphone()
-            cellPhone.setBrand("Samsung unique")
+            cellPhone.brand = "Samsung unique"
             cellPhone.price = Math.random()
             cellPhone.serial = UUID.randomUUID().toString()
             cellList.add(cellPhone)
         }
         TestCase.assertTrue(cellList.saveAll())
         for (cell in cellList) {
-            TestCase.assertTrue(cell.isSaved)
+            TestCase.assertTrue(cell.isSaved())
         }
     }
 
@@ -133,7 +134,7 @@ class SaveAllKotlinTest {
         val tableName = DBUtility.getIntermediateTableName(studentTable, teacherTable)
         for (student in studentList) {
             val cursor = findBySQL(
-                    "select * from " + tableName + " where " + studentTable + "_id=?", student.id.toString())
+                    "select * from " + tableName + " where " + studentTable + "_id=?", student.id.toString())!!
             assertEquals(3, cursor.count)
             cursor.close()
         }
@@ -156,9 +157,9 @@ class SaveAllKotlinTest {
         TestCase.assertTrue(classroomList.saveAll())
         assertEquals(50, classroomList.size)
         for (classroom in classroomList) {
-            TestCase.assertTrue(classroom.isSaved)
-            val c = find(Classroom::class.java, classroom._id.toLong())
-            TestCase.assertTrue(c.name.startsWith("classroom"))
+            TestCase.assertTrue(classroom.isSaved())
+            val c = find(Classroom::class.java, classroom._id.toLong())!!
+            TestCase.assertTrue(c.name!!.startsWith("classroom"))
             assertEquals(20, c.news.size)
             assertEquals(13, c.numbers.size)
         }
@@ -170,11 +171,13 @@ class SaveAllKotlinTest {
         val serial = UUID.randomUUID().toString()
         for (i in 0..19) {
             val cellphone = Cellphone()
-            cellphone.setBrand("Apple")
+            cellphone.brand = "Apple"
             cellphone.serial = serial + i % 10 // serial is unique, so this should save failed
             cellphones.add(cellphone)
         }
-        TestCase.assertFalse(cellphones.saveAll())
+        LitePalRuntime.withSilentErrorLog {
+            TestCase.assertFalse(cellphones.saveAll())
+        }
         val list = where("serial like ?", "$serial%").find(Cellphone::class.java)
         TestCase.assertTrue(list.isEmpty())
     }

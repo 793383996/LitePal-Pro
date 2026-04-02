@@ -21,7 +21,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         assertNotNull(firstBook)
         for (i in books.indices) {
             val book = books[i]
-            assertTrue(book.isSaved)
+            assertTrue(book.isSaved())
             assertEquals(expectedBooks[i].bookName, book.bookName)
             assertNull(book.pages)
             assertEquals(false, book.isPublished)
@@ -31,7 +31,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
             assertEquals(0, book.level.toInt())
             assertEquals(expectedBooks[i].id, book.id)
             if (i == 0) {
-                assertEquals(firstBook!!.isSaved, book.isSaved)
+                assertEquals(firstBook!!.isSaved(), book.isSaved())
                 assertEquals(firstBook.bookName, book.bookName)
                 assertNull(firstBook.pages)
                 assertEquals(firstBook.isPublished, book.isPublished)
@@ -42,7 +42,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
                 assertEquals(firstBook.id, book.id)
             }
             if (i == books.size - 1) {
-                assertEquals(lastBook!!.isSaved, book.isSaved)
+                assertEquals(lastBook!!.isSaved(), book.isSaved())
                 assertEquals(lastBook.bookName, book.bookName)
                 assertNull(lastBook.pages)
                 assertEquals(lastBook.isPublished, book.isPublished)
@@ -62,7 +62,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         val lastBook = LitePal.where("bookname = ?", "Android First Line").findLast<Book>()
         for (i in books.indices) {
             val book = books[i]
-            assertTrue(book.isSaved)
+            assertTrue(book.isSaved())
             assertEquals("Android First Line", book.bookName)
             assertTrue(450 == book.pages)
             assertEquals(49.99, book.price)
@@ -70,7 +70,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
             assertEquals('A', book.level)
             assertEquals(10.5f, book.area)
             if (i == 0) {
-                assertEquals(firstBook!!.isSaved, book.isSaved)
+                assertEquals(firstBook!!.isSaved(), book.isSaved())
                 assertEquals(firstBook.bookName, book.bookName)
                 assertEquals(firstBook.pages, book.pages)
                 assertEquals(firstBook.isPublished, book.isPublished)
@@ -81,7 +81,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
                 assertEquals(firstBook.id, book.id)
             }
             if (i == books.size - 1) {
-                assertEquals(lastBook!!.isSaved, book.isSaved)
+                assertEquals(lastBook!!.isSaved(), book.isSaved())
                 assertEquals(lastBook.bookName, book.bookName)
                 assertEquals(lastBook.pages, book.pages)
                 assertEquals(lastBook.isPublished, book.isPublished)
@@ -106,13 +106,13 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         var preBook: Book? = null
         for (i in books.indices) {
             val book = books[i]
-            assertTrue(book.isSaved)
+            assertTrue(book.isSaved())
             if (preBook != null) {
                 assertTrue(book.id > preBook.id)
             }
             preBook = book
             if (i == 0) {
-                assertEquals(firstBook!!.isSaved, book.isSaved)
+                assertEquals(firstBook!!.isSaved(), book.isSaved())
                 assertEquals(firstBook.bookName, book.bookName)
                 assertEquals(firstBook.pages, book.pages)
                 assertEquals(firstBook.isPublished, book.isPublished)
@@ -123,7 +123,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
                 assertEquals(firstBook.id, book.id)
             }
             if (i == books.size - 1) {
-                assertEquals(lastBook!!.isSaved, book.isSaved)
+                assertEquals(lastBook!!.isSaved(), book.isSaved())
                 assertEquals(lastBook.bookName, book.bookName)
                 assertEquals(lastBook.pages, book.pages)
                 assertEquals(lastBook.isPublished, book.isPublished)
@@ -140,13 +140,13 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         var inversePreBook: Book? = null
         for (i in inverseBooks.indices) {
             val book = inverseBooks[i]
-            assertTrue(book.isSaved)
+            assertTrue(book.isSaved())
             if (inversePreBook != null) {
                 assertTrue(book.id < inversePreBook.id)
             }
             inversePreBook = book
             if (i == 0) {
-                assertEquals(inverseFirstBook!!.isSaved, book.isSaved)
+                assertEquals(inverseFirstBook!!.isSaved(), book.isSaved())
                 assertEquals(inverseFirstBook.bookName, book.bookName)
                 assertEquals(inverseFirstBook.pages, book.pages)
                 assertEquals(inverseFirstBook.isPublished, book.isPublished)
@@ -157,7 +157,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
                 assertEquals(inverseFirstBook.id, book.id)
             }
             if (i == books.size - 1) {
-                assertEquals(inverseLastBook!!.isSaved, book.isSaved)
+                assertEquals(inverseLastBook!!.isSaved(), book.isSaved())
                 assertEquals(inverseLastBook.bookName, book.bookName)
                 assertEquals(inverseLastBook.pages, book.pages)
                 assertEquals(inverseLastBook.isPublished, book.isPublished)
@@ -175,9 +175,9 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         var bookList = LitePal.limit(1).find<Book>()
         assertEquals(1, bookList.size)
         var book = bookList[0]
-        assertTrue(book.isSaved)
+        assertTrue(book.isSaved())
         val firstBook = LitePal.findFirst<Book>()
-        assertTrue(firstBook!!.isSaved)
+        assertTrue(firstBook!!.isSaved())
         assertEquals(firstBook.bookName, book.bookName)
         assertEquals(firstBook.pages, book.pages)
         assertEquals(firstBook.isPublished, book.isPublished)
@@ -189,9 +189,9 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         bookList = LitePal.order("id desc").limit(1).find()
         assertEquals(1, bookList.size)
         book = bookList[0]
-        assertTrue(book.isSaved)
+        assertTrue(book.isSaved())
         val lastBook = LitePal.findLast(Book::class.java)
-        assertTrue(lastBook!!.isSaved)
+        assertTrue(lastBook!!.isSaved())
         assertEquals(lastBook.bookName, book.bookName)
         assertEquals(lastBook.pages, book.pages)
         assertEquals(lastBook.isPublished, book.isPublished)
@@ -209,7 +209,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         val bookList = LitePal.limit(1).offset(1).find<Book>()
         assertEquals(1, bookList.size)
         val book = bookList[0]
-        assertTrue(book.isSaved)
+        assertTrue(book.isSaved())
         val expectedBooks = getBooks(null, null, null, null, null, null, null)
         val expectedBook = expectedBooks[1]
         assertEquals(expectedBook.bookName, book.bookName)
@@ -250,7 +250,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
         for (i in 0..1) {
             val b = books[i]
             assertEquals(ids[i + 1], b.id)
-            assertTrue(b.isSaved)
+            assertTrue(b.isSaved())
             assertNull(b.bookName)
             assertTrue(5555 == b.pages)
             assertEquals(true, b.isPublished)
@@ -259,7 +259,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
             assertEquals(0, b.isbn.toInt())
             assertEquals(0, b.level.toInt())
             if (i == 0) {
-                assertEquals(firstBook!!.isSaved, b.isSaved)
+                assertEquals(firstBook!!.isSaved(), b.isSaved())
                 assertEquals(firstBook.bookName, b.bookName)
                 assertEquals(firstBook.pages, b.pages)
                 assertEquals(firstBook.isPublished, b.isPublished)
@@ -270,7 +270,7 @@ class QueryClusterKotlinTest : LitePalTestCase() {
                 assertEquals(firstBook.id, b.id)
             }
             if (i == books.size - 1) {
-                assertEquals(lastBook!!.isSaved, b.isSaved)
+                assertEquals(lastBook!!.isSaved(), b.isSaved())
                 assertEquals(lastBook.bookName, b.bookName)
                 assertEquals(lastBook.pages, b.pages)
                 assertEquals(lastBook.isPublished, b.isPublished)

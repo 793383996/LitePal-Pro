@@ -26,7 +26,7 @@ class UpdateUsingUpdateMethodKotlinTest : LitePalTestCase() {
 
     private var classroom: Classroom? = null
 
-    private var studentTable: String? = null
+    private var studentTable: String = ""
 
     @Before
     fun setUp() {
@@ -51,8 +51,8 @@ class UpdateUsingUpdateMethodKotlinTest : LitePalTestCase() {
         student!!.age = 13
         student!!.classroom = classroom
         student!!.birthday = Date()
-        student!!.teachers.add(teacher)
-        teacher!!.students.add(student)
+        student!!.teachers.add(teacher!!)
+        teacher!!.students.add(student!!)
         student!!.save()
         teacher!!.save()
         classroom!!.save()
@@ -243,7 +243,7 @@ class UpdateUsingUpdateMethodKotlinTest : LitePalTestCase() {
         val table = DBUtility.getIntermediateTableName(studentTable, DBUtility.getTableNameByClassName(Teacher::class.java.name))
         allRows = getRowsCount(table)
         values.clear()
-        values.putNull(studentTable!! + "_id")
+        values.putNull(studentTable + "_id")
         affectedRows = LitePal.updateAll(table, values)
         assertEquals(allRows, affectedRows)
     }
@@ -293,7 +293,7 @@ class UpdateUsingUpdateMethodKotlinTest : LitePalTestCase() {
         assertEquals(1, affectedRows)
         val updatedStu = LitePal.find(Student::class.java, ids[3].toLong())
         assertEquals(24, updatedStu!!.age)
-        assertEquals(date.time, updatedStu.birthday.time)
+        assertEquals(date.time, updatedStu.birthday!!.time)
         toUpdate.age = 18
         toUpdate.name = "Jess"
         affectedRows = toUpdate.updateAll("name = ?", "Jessica")
@@ -395,7 +395,7 @@ class UpdateUsingUpdateMethodKotlinTest : LitePalTestCase() {
         }
 
         try {
-            student.updateAll(null, null)
+            student.updateAll("", "")
             fail()
         } catch (e: DataSupportException) {
             assertEquals("The parameters in conditions are incorrect.", e.message)

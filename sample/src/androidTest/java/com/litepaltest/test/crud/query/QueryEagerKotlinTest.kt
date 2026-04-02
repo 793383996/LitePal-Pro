@@ -65,10 +65,10 @@ class QueryEagerKotlinTest {
         teacher2 = Teacher()
         teacher2!!.isSex = false
         teacher2!!.teacherName = "Teacher 2"
-        student1!!.teachers.add(teacher1)
-        student1!!.teachers.add(teacher2)
-        student2!!.teachers.add(teacher2)
-        classroom!!.teachers.add(teacher1)
+        student1!!.teachers.add(teacher1!!)
+        student1!!.teachers.add(teacher2!!)
+        student2!!.teachers.add(teacher2!!)
+        classroom!!.teachers.add(teacher1!!)
         classroom!!.save()
         student1!!.save()
         student2!!.save()
@@ -89,13 +89,13 @@ class QueryEagerKotlinTest {
         assertNotNull(ic)
         assertEquals(classroom!!._id, c!!._id)
         assertEquals("Classroom 11", c.name)
-        assertEquals(idcard1!!.id, ic.id)
+        assertEquals(idcard1!!.id, ic!!.id)
         assertEquals("320311", ic.number)
         assertEquals(student1!!.teachers.size, tList.size)
         val calendar = Calendar.getInstance()
         calendar.clear()
         calendar.set(1990, 9, 16, 0, 0, 0)
-        assertEquals(calendar.time.time, s1.birthday.time)
+        assertEquals(calendar.time.time, s1.birthday!!.time)
         for (t in tList) {
             if (t.id == teacher1!!.id) {
                 assertEquals("Teacher 1", t.teacherName)
@@ -127,7 +127,7 @@ class QueryEagerKotlinTest {
                 assertEquals("Student 2", s.name)
                 calendar.clear()
                 calendar.set(1989, 7, 7, 0, 0, 0)
-                assertEquals(calendar.time.time, s.birthday.time)
+                assertEquals(calendar.time.time, s.birthday!!.time)
                 continue
             }
             fail()
@@ -140,7 +140,7 @@ class QueryEagerKotlinTest {
                 assertEquals("Student 1", s.name)
                 calendar.clear()
                 calendar.set(1990, 9, 16, 0, 0, 0)
-                assertEquals(calendar.time.time, s.birthday.time)
+                assertEquals(calendar.time.time, s.birthday!!.time)
                 continue
             }
             if (s.id == student2!!.id) {
@@ -189,10 +189,8 @@ class QueryEagerKotlinTest {
         }
         sList = LitePal.findAll(true)
         for (s in sList) {
-            if (s.classroom == null) {
-                continue
-            }
-            assertEquals("Classroom 11", s.classroom.name)
+            val classroom = s.classroom ?: continue
+            assertEquals("Classroom 11", classroom.name)
             assertTrue(s.teachers.size > 0)
             val tList = s.teachers
             for (t in tList) {
@@ -224,7 +222,7 @@ class QueryEagerKotlinTest {
         s = sList[0]
         assertNotNull(s.classroom)
         val c = s.classroom
-        assertEquals("Classroom 11", c.name)
+        assertEquals("Classroom 11", c!!.name)
     }
 
 }

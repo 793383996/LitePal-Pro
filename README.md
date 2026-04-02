@@ -3,6 +3,8 @@
 
 [中文文档](https://blog.csdn.net/sinyu890807/category_9262963.html)
 
+4.0 project docs are available in [`docs/`](./docs/README.md).
+
 LitePal is an open source Android library that allows developers to use SQLite database extremely easy. You can finish most of the database operations without writing even a SQL statement, including create or upgrade tables, crud operations, aggregate functions, etc. The setup of LitePal is quite simple as well, you can integrate it into your project in less than 5 minutes. 
 
 Experience the magic right now and have fun!
@@ -24,9 +26,15 @@ Edit your **build.gradle** file and add below dependency.
 
 ``` groovy
 dependencies {
-    implementation 'org.litepal.guolindev:core:3.2.3'
+    implementation 'org.litepal.pro:core:4.0.1'
 }
 ```
+
+> LitePal 4.0:
+> - Kotlin async APIs are removed.
+> - minSdk is 24.
+> - Schema upgrade uses safe migration strategy for unique/not-null changes.
+> - Java static-call compatibility is no longer guaranteed; migrate to Kotlin-first API usage.
 
 #### 2. Configure litepal.xml
 Create a file in the **assets** folder of your project and name it as **litepal.xml**. Then copy the following codes into it.
@@ -439,10 +447,127 @@ If you are using ProGuard you might need to add the following option:
 -keep class * extends org.litepal.crud.LitePalSupport {*;}
 ```
 
+## Maven 发布指南（目标坐标：org.litepal.pro:core:4.0.1）
+当前仓库默认发布 `:core` 模块，坐标如下：
+
+```text
+groupId    = org.litepal.pro
+artifactId = core
+version    = 4.0.1
+```
+
+#### 1. 发布前分析（必须先确认）
+- 坐标变更点：从旧坐标迁移到 `org.litepal.pro:core:4.0.1`，其中 `artifactId` 仍为 `core`。
+- 命名空间建议：在 Central Portal 建议申请 `org.litepal`，再发布子命名空间 `org.litepal.pro`。
+- 直接申请 `org.litepal.pro` 的前提：需证明你控制 `pro.litepal.org` 域名。
+- Maven Central 强制要求：POM 元信息完整、带 sources/javadoc、并完成 GPG 签名。
+
+#### 2. 准备账号与密钥
+在 `~/.gradle/gradle.properties` 中配置（建议本机用户目录，不要提交到仓库）：
+
+```properties
+# 坐标（可选，默认就是下列值）
+POM_GROUP_ID=org.litepal.pro
+POM_ARTIFACT_ID=core
+POM_VERSION=4.0.1
+
+# Central Portal Token（或 OSSRH 兼容 token）
+CENTRAL_USERNAME=your-central-token-username
+CENTRAL_PASSWORD=your-central-token-password
+
+# 提交到 Portal manual upload 接口时使用的命名空间
+# 推荐填：org.litepal
+CENTRAL_NAMESPACE=org.litepal
+
+# ASCII-armored 私钥和口令
+SIGNING_KEY=-----BEGIN PGP PRIVATE KEY BLOCK-----\n...\n-----END PGP PRIVATE KEY BLOCK-----
+SIGNING_PASSWORD=your-gpg-passphrase
+SIGNING_KEY_ID=0123456789ABCDEF
+```
+
+#### 3. 先做本地验证（避免远端失败）
+Windows:
+
+```powershell
+.\gradlew.bat :core:publishReleasePublicationToMavenLocal
+```
+
+macOS / Linux:
+
+```bash
+./gradlew :core:publishReleasePublicationToMavenLocal
+```
+
+#### 4. 上传到 Sonatype 兼容发布端点
+Windows:
+
+```powershell
+.\gradlew.bat :core:publishReleasePublicationToSonatypeRepository
+```
+
+macOS / Linux:
+
+```bash
+./gradlew :core:publishReleasePublicationToSonatypeRepository
+```
+
+#### 5. 提交到 Central Portal 可见性队列
+Windows:
+
+```powershell
+.\gradlew.bat :core:submitReleaseToCentralPortal
+```
+
+macOS / Linux:
+
+```bash
+./gradlew :core:submitReleaseToCentralPortal
+```
+
+一条命令串行发布：
+
+```powershell
+.\gradlew.bat :core:publishReleaseToCentralPortal
+```
+
+#### 6. 发布后验收
+- 在 Central Portal 检查 deployment 状态是否成功。
+- 等待 Maven Central 索引完成，再对外公告。
+- 对外依赖写法：
+
+```groovy
+dependencies {
+    implementation 'org.litepal.pro:core:4.0.1'
+}
+```
+
+## 4.0.1 可靠性增强说明
+- 新增运行时错误策略：
+  - `LitePal.setErrorPolicy(LitePalErrorPolicy.COMPAT)`（默认）
+  - `LitePal.setErrorPolicy(LitePalErrorPolicy.STRICT)`
+- 新增加密策略：
+  - `LitePal.setCryptoPolicy(LitePalCryptoPolicy.V2_WRITE_DUAL_READ)`（默认，AES-GCM 新写入 + 兼容旧密文读取）
+  - `LitePal.setCryptoPolicy(LitePalCryptoPolicy.LEGACY_WRITE_LEGACY_READ)`
+- `@Encrypt(MD5)` 仍兼容，但已弃用，仅建议用于不可逆摘要场景。
+
 ## Bugs Report
 If you find any bug when using LitePal, please report **[here](https://github.com/LitePalFramework/LitePal/issues/new)**. Thanks for helping us making better.
 
 ## Change logs
+
+### 4.0.1
+ * Runtime stability hardening with read/write lock based DB runtime coordination.
+ * SQL safety improvements: delete/update cascade paths are parameterized.
+ * Introduce crypto dual-stack migration (`AES-GCM v2` write + legacy read compatibility).
+ * Add runtime error policy and crypto policy APIs.
+ * Replace `printStackTrace()` with structured logging.
+ * Add core-level tests and GitHub Actions verification workflows.
+
+### 4.0.0
+ * Kotlin first upgrade and toolchain refresh.
+ * Remove built-in async APIs in Kotlin layer. Use your own coroutine/executor.
+ * Introduce safer schema migration policy for unique/not-null upgrades.
+ * Add 3.x compatibility helper modules (`compat-3x-*`).
 
 ### 3.2.3
  * Support database index by adding @Column(index = true) on field.

@@ -19,8 +19,10 @@ package org.litepal
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import androidx.lifecycle.LifecycleOwner
 import org.litepal.crud.LitePalSupport
 import org.litepal.tablemanager.callback.DatabaseListener
+import org.litepal.tablemanager.callback.DatabasePreloadListener
 
 /**
  * LitePal is an Android library that allows developers to use SQLite database extremely easy.
@@ -105,6 +107,38 @@ object LitePal {
     @JvmStatic
     fun aesKey(key: String) {
         Operator.aesKey(key)
+    }
+
+    @JvmStatic
+    fun setErrorPolicy(policy: LitePalErrorPolicy) {
+        Operator.setErrorPolicy(policy)
+    }
+
+    @JvmStatic
+    fun setCryptoPolicy(policy: LitePalCryptoPolicy) {
+        Operator.setCryptoPolicy(policy)
+    }
+
+    @JvmStatic
+    fun setRuntimeOptions(options: LitePalRuntimeOptions) {
+        Operator.setRuntimeOptions(options)
+    }
+
+    @JvmStatic
+    fun getRuntimeOptions(): LitePalRuntimeOptions = Operator.getRuntimeOptions()
+
+    @JvmStatic
+    fun getGeneratedPathHitCount(): Long = Operator.getGeneratedPathHitCount()
+
+    @JvmStatic
+    fun getReflectionFallbackCount(): Long = Operator.getReflectionFallbackCount()
+
+    @JvmStatic
+    fun getMainThreadDbBlockTotalMs(): Long = Operator.getMainThreadDbBlockTotalMs()
+
+    @JvmStatic
+    fun resetRuntimeMetrics() {
+        Operator.resetRuntimeMetrics()
     }
 
     /**
@@ -205,15 +239,12 @@ object LitePal {
     fun count(modelClass: Class<*>) = Operator.count(modelClass)
 
     /**
-     * Basically same as [LitePal.count] but pending to a new thread for executing.
+     * Basically same as [LitePal.count] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query from by class.
      * @return A CountExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun countAsync(modelClass: Class<*>) = Operator.countAsync(modelClass)
 
     /**
      * Count the records.
@@ -234,15 +265,12 @@ object LitePal {
     fun count(tableName: String) = Operator.count(tableName)
 
     /**
-     * Basically same as [LitePal.count] but pending to a new thread for executing.
+     * Basically same as [LitePal.count] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to query from.
      * @return A CountExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun countAsync(tableName: String) = Operator.countAsync(tableName)
 
     /**
      * Calculates the average value on a given column.
@@ -263,7 +291,7 @@ object LitePal {
     fun average(modelClass: Class<*>, column: String) = Operator.average(modelClass, column)
 
     /**
-     * Basically same as [LitePal.average] but pending to a new thread for executing.
+     * Basically same as [LitePal.average] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query from by class.
@@ -271,9 +299,6 @@ object LitePal {
      * The based on column to calculate.
      * @return A AverageExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun averageAsync(modelClass: Class<*>, column: String) = Operator.averageAsync(modelClass, column)
 
     /**
      * Calculates the average value on a given column.
@@ -294,7 +319,7 @@ object LitePal {
     fun average(tableName: String, column: String) = Operator.average(tableName, column)
 
     /**
-     * Basically same as [LitePal.average] but pending to a new thread for executing.
+     * Basically same as [LitePal.average] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to query from.
@@ -302,9 +327,6 @@ object LitePal {
      * The based on column to calculate.
      * @return A AverageExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun averageAsync(tableName: String, column: String) = Operator.averageAsync(tableName, column)
 
     /**
      * Calculates the maximum value on a given column. The value is returned
@@ -328,7 +350,7 @@ object LitePal {
     fun <T> max(modelClass: Class<*>, columnName: String, columnType: Class<T>) = Operator.max(modelClass, columnName, columnType)
 
     /**
-     * Basically same as [LitePal.max] but pending to a new thread for executing.
+     * Basically same as [LitePal.max] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query from by class.
@@ -338,9 +360,6 @@ object LitePal {
      * The type of the based on column.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> maxAsync(modelClass: Class<*>, columnName: String, columnType: Class<T>) = Operator.maxAsync(modelClass, columnName, columnType)
 
     /**
      * Calculates the maximum value on a given column. The value is returned
@@ -364,7 +383,7 @@ object LitePal {
     fun <T> max(tableName: String, columnName: String, columnType: Class<T>) = Operator.max(tableName, columnName, columnType)
 
     /**
-     * Basically same as [LitePal.max] but pending to a new thread for executing.
+     * Basically same as [LitePal.max] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to query from.
@@ -374,9 +393,6 @@ object LitePal {
      * The type of the based on column.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> maxAsync(tableName: String, columnName: String, columnType: Class<T>) = Operator.maxAsync(tableName, columnName, columnType)
 
     /**
      * Calculates the minimum value on a given column. The value is returned
@@ -400,7 +416,7 @@ object LitePal {
     fun <T> min(modelClass: Class<*>, columnName: String, columnType: Class<T>) = Operator.min(modelClass, columnName, columnType)
 
     /**
-     * Basically same as [LitePal.min] but pending to a new thread for executing.
+     * Basically same as [LitePal.min] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query from by class.
@@ -410,9 +426,6 @@ object LitePal {
      * The type of the based on column.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> minAsync(modelClass: Class<*>, columnName: String, columnType: Class<T>) = Operator.minAsync(modelClass, columnName, columnType)
 
     /**
      * Calculates the minimum value on a given column. The value is returned
@@ -436,7 +449,7 @@ object LitePal {
     fun <T> min(tableName: String, columnName: String, columnType: Class<T>) = Operator.min(tableName, columnName, columnType)
 
     /**
-     * Basically same as [LitePal.min] but pending to a new thread for executing.
+     * Basically same as [LitePal.min] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to query from.
@@ -446,9 +459,6 @@ object LitePal {
      * The type of the based on column.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> minAsync(tableName: String, columnName: String, columnType: Class<T>) = Operator.minAsync(tableName, columnName, columnType)
 
     /**
      * Calculates the sum of values on a given column. The value is returned
@@ -472,7 +482,7 @@ object LitePal {
     fun <T> sum(modelClass: Class<*>, columnName: String, columnType: Class<T>) = Operator.sum(modelClass, columnName, columnType)
 
     /**
-     * Basically same as [LitePal.sum] but pending to a new thread for executing.
+     * Basically same as [LitePal.sum] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query from by class.
@@ -482,9 +492,6 @@ object LitePal {
      * The type of the based on column.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> sumAsync(modelClass: Class<*>, columnName: String, columnType: Class<T>) = Operator.sumAsync(modelClass, columnName, columnType)
 
     /**
      * Calculates the sum of values on a given column. The value is returned
@@ -508,7 +515,7 @@ object LitePal {
     fun <T> sum(tableName: String, columnName: String, columnType: Class<T>) = Operator.sum(tableName, columnName, columnType)
 
     /**
-     * Basically same as [LitePal.sum] but pending to a new thread for executing.
+     * Basically same as [LitePal.sum] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to query from.
@@ -518,9 +525,6 @@ object LitePal {
      * The type of the based on column.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> sumAsync(tableName: String, columnName: String, columnType: Class<T>) = Operator.sumAsync(tableName, columnName, columnType)
 
     /**
      * Finds the record by a specific id.
@@ -544,7 +548,7 @@ object LitePal {
     fun <T> find(modelClass: Class<T>, id: Long) = Operator.find(modelClass, id)
 
     /**
-     * Basically same as [LitePal.find] but pending to a new thread for executing.
+     * Basically same as [LitePal.find] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return.
@@ -552,9 +556,6 @@ object LitePal {
      * Which record to query.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findAsync(modelClass: Class<T>, id: Long) = Operator.findAsync(modelClass, id)
 
     /**
      * It is mostly same as [LitePal.find] but an isEager
@@ -575,7 +576,7 @@ object LitePal {
     fun <T> find(modelClass: Class<T>, id: Long, isEager: Boolean) = Operator.find(modelClass, id, isEager)
 
     /**
-     * Basically same as [LitePal.find] but pending to a new thread for executing.
+     * Basically same as [LitePal.find] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return.
@@ -585,9 +586,6 @@ object LitePal {
      * True to load the associated models, false not.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findAsync(modelClass: Class<T>, id: Long, isEager: Boolean) = Operator.findAsync(modelClass, id, isEager)
 
     /**
      * Finds the first record of a single table.
@@ -606,15 +604,12 @@ object LitePal {
     fun <T> findFirst(modelClass: Class<T>) = Operator.findFirst(modelClass)
 
     /**
-     * Basically same as [LitePal.findFirst] but pending to a new thread for executing.
+     * Basically same as [LitePal.findFirst] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findFirstAsync(modelClass: Class<T>) = Operator.findFirstAsync(modelClass)
 
     /**
      * It is mostly same as [LitePal.findFirst] but an isEager
@@ -633,7 +628,7 @@ object LitePal {
     fun <T> findFirst(modelClass: Class<T>, isEager: Boolean) = Operator.findFirst(modelClass, isEager)
 
     /**
-     * Basically same as [LitePal.findFirst] but pending to a new thread for executing.
+     * Basically same as [LitePal.findFirst] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return.
@@ -641,9 +636,6 @@ object LitePal {
      * True to load the associated models, false not.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findFirstAsync(modelClass: Class<T>, isEager: Boolean) = Operator.findFirstAsync(modelClass, isEager)
 
     /**
      * Finds the last record of a single table.
@@ -662,15 +654,12 @@ object LitePal {
     fun <T> findLast(modelClass: Class<T>) = Operator.findLast(modelClass)
 
     /**
-     * Basically same as [LitePal.findLast] but pending to a new thread for executing.
+     * Basically same as [LitePal.findLast] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findLastAsync(modelClass: Class<T>) = Operator.findLastAsync(modelClass)
 
     /**
      * It is mostly same as [LitePal.findLast] but an isEager
@@ -689,7 +678,7 @@ object LitePal {
     fun <T> findLast(modelClass: Class<T>, isEager: Boolean) = Operator.findLast(modelClass, isEager)
 
     /**
-     * Basically same as [LitePal.findLast] but pending to a new thread for executing.
+     * Basically same as [LitePal.findLast] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return.
@@ -697,9 +686,6 @@ object LitePal {
      * True to load the associated models, false not.
      * @return A FindExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findLastAsync(modelClass: Class<T>, isEager: Boolean) = Operator.findLastAsync(modelClass, isEager)
 
     /**
      * Finds multiple records by an id array.
@@ -731,7 +717,7 @@ object LitePal {
     fun <T> findAll(modelClass: Class<T>, vararg ids: Long) = Operator.findAll(modelClass, *ids)
 
     /**
-     * Basically same as [LitePal.findAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.findAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return as a list.
@@ -739,9 +725,6 @@ object LitePal {
      * Which records to query. Or do not pass it to find all records.
      * @return A FindMultiExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findAllAsync(modelClass: Class<T>, vararg ids: Long) = Operator.findAllAsync(modelClass, *ids)
 
     /**
      * It is mostly same as [LitePal.findAll] but an
@@ -762,7 +745,7 @@ object LitePal {
     fun <T> findAll(modelClass: Class<T>, isEager: Boolean, vararg ids: Long) = Operator.findAll(modelClass, isEager, *ids)
 
     /**
-     * Basically same as [LitePal.findAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.findAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to query and the object type to return as a list.
@@ -772,9 +755,6 @@ object LitePal {
      * Which records to query. Or do not pass it to find all records.
      * @return A FindMultiExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T> findAllAsync(modelClass: Class<T>, isEager: Boolean, vararg ids: Long) = Operator.findAllAsync(modelClass, isEager, *ids)
 
     /**
      * Runs the provided SQL and returns a Cursor over the result set. You may
@@ -813,7 +793,7 @@ object LitePal {
     fun delete(modelClass: Class<*>, id: Long) = Operator.delete(modelClass, id)
 
     /**
-     * Basically same as [LitePal.delete] but pending to a new thread for executing.
+     * Basically same as [LitePal.delete] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to delete from by class.
@@ -821,9 +801,6 @@ object LitePal {
      * Which record to delete.
      * @return A UpdateOrDeleteExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun deleteAsync(modelClass: Class<*>, id: Long) = Operator.deleteAsync(modelClass, id)
 
     /**
      * Deletes all records with details given if they match a set of conditions
@@ -851,7 +828,7 @@ object LitePal {
     fun deleteAll(modelClass: Class<*>, vararg conditions: String?) = Operator.deleteAll(modelClass, *conditions)
 
     /**
-     * Basically same as [LitePal.deleteAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.deleteAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to delete from by class.
@@ -865,9 +842,6 @@ object LitePal {
      * all rows.
      * @return A UpdateOrDeleteExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun deleteAllAsync(modelClass: Class<*>, vararg conditions: String?) = Operator.deleteAllAsync(modelClass, *conditions)
 
     /**
      * Deletes all records with details given if they match a set of conditions
@@ -898,7 +872,7 @@ object LitePal {
     fun deleteAll(tableName: String, vararg conditions: String?) = Operator.deleteAll(tableName, *conditions)
 
     /**
-     * Basically same as [LitePal.deleteAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.deleteAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to delete from.
@@ -912,9 +886,6 @@ object LitePal {
      * all rows.
      * @return A UpdateOrDeleteExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun deleteAllAsync(tableName: String, vararg conditions: String?) = Operator.deleteAllAsync(tableName, *conditions)
 
     /**
      * Updates the corresponding record by id with ContentValues. Returns the
@@ -941,7 +912,7 @@ object LitePal {
     fun update(modelClass: Class<*>, values: ContentValues, id: Long) = Operator.update(modelClass, values, id)
 
     /**
-     * Basically same as [LitePal.update] but pending to a new thread for executing.
+     * Basically same as [LitePal.update] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to update by class.
@@ -952,9 +923,6 @@ object LitePal {
      * Which record to update.
      * @return A UpdateOrDeleteExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun updateAsync(modelClass: Class<*>, values: ContentValues, id: Long) = Operator.updateAsync(modelClass, values, id)
 
     /**
      * Updates all records with details given if they match a set of conditions
@@ -989,7 +957,7 @@ object LitePal {
     fun updateAll(modelClass: Class<*>, values: ContentValues, vararg conditions: String?) = Operator.updateAll(modelClass, values, *conditions)
 
     /**
-     * Basically same as [LitePal.updateAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.updateAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param modelClass
      * Which table to update by class.
@@ -1006,9 +974,6 @@ object LitePal {
      * all rows.
      * @return A UpdateOrDeleteExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun updateAllAsync(modelClass: Class<*>, values: ContentValues, vararg conditions: String?) = Operator.updateAllAsync(modelClass, values, *conditions)
 
     /**
      * Updates all records with details given if they match a set of conditions
@@ -1043,7 +1008,7 @@ object LitePal {
     fun updateAll(tableName: String, values: ContentValues, vararg conditions: String?) = Operator.updateAll(tableName, values, *conditions)
 
     /**
-     * Basically same as [LitePal.updateAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.updateAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param tableName
      * Which table to update.
@@ -1060,9 +1025,6 @@ object LitePal {
      * all rows.
      * @return A UpdateOrDeleteExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun updateAllAsync(tableName: String, values: ContentValues, vararg conditions: String?) = Operator.updateAllAsync(tableName, values, *conditions)
 
     /**
      * Saves the collection into database.
@@ -1092,15 +1054,12 @@ object LitePal {
     fun <T : LitePalSupport> saveAll(collection: Collection<T>) = Operator.saveAll(collection)
 
     /**
-     * Basically same as [LitePal.saveAll] but pending to a new thread for executing.
+     * Basically same as [LitePal.saveAll] but running synchronously now. Use your own coroutine/executor when async is needed.
      *
      * @param collection
      * Holds all models to save.
      * @return A SaveExecutor instance.
      */
-    @JvmStatic
-    @Deprecated("This method is deprecated and will be removed in the future releases.", ReplaceWith("Handle async db operation in your own logic instead."))
-    fun <T : LitePalSupport> saveAllAsync(collection: Collection<T>) = Operator.saveAllAsync(collection)
 
     /**
      * Provide a way to mark all models in collection as deleted. This means these models' save
@@ -1135,4 +1094,29 @@ object LitePal {
         Operator.registerDatabaseListener(listener)
     }
 
+    /**
+     * Register a listener that will be automatically unregistered when [owner] is destroyed.
+     */
+    @JvmStatic
+    fun registerDatabaseListener(owner: LifecycleOwner, listener: DatabaseListener) {
+        Operator.registerDatabaseListener(owner, listener)
+    }
+
+    /**
+     * Unregister current database listener.
+     */
+    @JvmStatic
+    fun unregisterDatabaseListener() {
+        Operator.unregisterDatabaseListener()
+    }
+
+    /**
+     * Trigger database open in background to reduce first synchronous open cost.
+     */
+    @JvmStatic
+    fun preloadDatabase(listener: DatabasePreloadListener? = null) {
+        Operator.preloadDatabase(listener)
+    }
+
 }
+

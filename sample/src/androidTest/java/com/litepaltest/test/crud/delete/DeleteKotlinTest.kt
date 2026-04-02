@@ -12,6 +12,7 @@ import org.junit.Before
 import org.junit.Test
 import org.litepal.LitePal
 import org.litepal.exceptions.DataSupportException
+import org.litepal.exceptions.LitePalSupportException
 import org.litepal.extension.delete
 import org.litepal.extension.deleteAll
 import org.litepal.extension.find
@@ -39,9 +40,9 @@ class DeleteKotlinTest : LitePalTestCase() {
 
     private var mikeCard: IdCard? = null
 
-    private var studentTable: String? = null
+    private var studentTable: String = ""
 
-    private var teacherTable: String? = null
+    private var teacherTable: String = ""
 
     @Before
     fun setUp() {
@@ -60,8 +61,8 @@ class DeleteKotlinTest : LitePalTestCase() {
         students.add(rose!!)
         students.add(jude!!)
         gameRoom!!.studentCollection = students
-        gameRoom!!.teachers.add(john)
-        gameRoom!!.teachers.add(mike)
+        gameRoom!!.teachers.add(john!!)
+        gameRoom!!.teachers.add(mike!!)
         gameRoom!!.save()
         rose!!.save()
         jude!!.save()
@@ -91,9 +92,9 @@ class DeleteKotlinTest : LitePalTestCase() {
         initJude()
         initMike()
         initJohn()
-        rose!!.teachers.add(john)
-        rose!!.teachers.add(mike)
-        jude!!.teachers.add(mike)
+        rose!!.teachers.add(john!!)
+        rose!!.teachers.add(mike!!)
+        jude!!.teachers.add(mike!!)
         rose!!.save()
         jude!!.save()
         john!!.save()
@@ -451,6 +452,8 @@ class DeleteKotlinTest : LitePalTestCase() {
         try {
             LitePal.deleteAll<Student>("address = ?", "HK")
             fail()
+        } catch (e: LitePalSupportException) {
+            assertTrue(e.message?.contains("no such column") == true)
         } catch (e: SQLiteException) {
         }
 
@@ -474,9 +477,9 @@ class DeleteKotlinTest : LitePalTestCase() {
         c = LitePal.findBySQL("select * from $tableName where $column = ?", id.toString())
         assertEquals(0, c!!.count)
         c.close()
-        assertFalse(classroom.isSaved)
+        assertFalse(classroom.isSaved())
         classroom.save()
-        assertTrue(classroom.isSaved)
+        assertTrue(classroom.isSaved())
         c = LitePal.findBySQL("select * from $tableName where $column = ?", classroom._id.toString())
         assertEquals(3, c!!.count)
         c.close()

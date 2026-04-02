@@ -1,1 +1,31 @@
-include 'sample', 'core'
+import org.gradle.api.initialization.resolve.RepositoriesMode
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "LitePal-Pro"
+
+include(
+        ":sample",
+        ":core",
+        ":compat-3x-api",
+        ":compat-3x-config",
+        ":compat-3x-schema",
+        ":compat-3x-tools",
+        ":compiler-common",
+        ":compiler-ksp",
+        ":compiler-kapt"
+)

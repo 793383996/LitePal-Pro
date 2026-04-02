@@ -23,12 +23,12 @@ class TransactionKotlinTest : LitePalTestCase() {
             book.bookName = "First Line of Android"
             book.pages = 700
             Assert.assertTrue(book.save())
-            val bookFromDb = LitePal.find(Book::class.java, book.id)
+            val bookFromDb = LitePal.find(Book::class.java, book.id)!!
             Assert.assertEquals("First Line of Android", bookFromDb.bookName)
-            Assert.assertEquals(700L, bookFromDb.pages.toInt().toLong())
+            Assert.assertEquals(700L, bookFromDb.pages!!.toInt().toLong())
             false
         }
-        Assert.assertTrue(book.isSaved)
+        Assert.assertTrue(book.isSaved())
         val bookFromDb = LitePal.find(Book::class.java, book.id)
         Assert.assertNull(bookFromDb)
     }
@@ -37,21 +37,23 @@ class TransactionKotlinTest : LitePalTestCase() {
     fun testTransactionForSaveAll() {
         val serial = UUID.randomUUID().toString()
         val weiboMessage = WeiboMessage()
-        LitePal.runInTransaction {
-            weiboMessage.follower = "nobody"
-            val saveResult = weiboMessage.save()
-            val cellphones: MutableList<Cellphone> = ArrayList()
-            for (i in 0..19) {
-                val cellphone = Cellphone()
-                cellphone.setBrand("Apple")
-                cellphone.serial = serial + i % 10 // serial is unique, so this should save failed
-                cellphone.messages.add(weiboMessage)
-                cellphones.add(cellphone)
+        expectFailureSilently {
+            LitePal.runInTransaction {
+                weiboMessage.follower = "nobody"
+                val saveResult = weiboMessage.save()
+                val cellphones: MutableList<Cellphone> = ArrayList()
+                for (i in 0..19) {
+                    val cellphone = Cellphone()
+                    cellphone.brand = "Apple"
+                    cellphone.serial = serial + i % 10 // serial is unique, so this should save failed
+                    cellphone.messages.add(weiboMessage)
+                    cellphones.add(cellphone)
+                }
+                val saveAllResult = LitePal.saveAll(cellphones)
+                saveResult && saveAllResult
             }
-            val saveAllResult = LitePal.saveAll(cellphones)
-            saveResult && saveAllResult
         }
-        Assert.assertTrue(weiboMessage.isSaved)
+        Assert.assertTrue(weiboMessage.isSaved())
         val messageFromDb = LitePal.find(WeiboMessage::class.java, weiboMessage.id.toLong())
         Assert.assertNull(messageFromDb)
         val list = LitePal.where("serial like ?", "$serial%").find(Cellphone::class.java)
@@ -71,12 +73,12 @@ class TransactionKotlinTest : LitePalTestCase() {
             values.put("TeachYears", 13)
             val rows = LitePal.update(Teacher::class.java, values, teacher.id.toLong())
             Assert.assertEquals(1, rows.toLong())
-            val teacherFromDb = LitePal.find(Teacher::class.java, teacher.id.toLong())
+            val teacherFromDb = LitePal.find(Teacher::class.java, teacher.id.toLong())!!
             Assert.assertEquals(13, teacherFromDb.teachYears.toLong())
             // not set transaction successful
             false
         }
-        val teacherFromDb = LitePal.find(Teacher::class.java, teacher.id.toLong())
+        val teacherFromDb = LitePal.find(Teacher::class.java, teacher.id.toLong())!!
         Assert.assertEquals(3, teacherFromDb.teachYears.toLong())
     }
 
@@ -98,7 +100,7 @@ class TransactionKotlinTest : LitePalTestCase() {
         val studentFromDb = LitePal.find<Student>(studentId.toLong())
         Assert.assertNotNull(studentFromDb)
         Assert.assertEquals("Tony", studentFromDb!!.name)
-        Assert.assertEquals(23, studentFromDb.age.toLong())
+        Assert.assertEquals(23, studentFromDb!!.age.toLong())
     }
 
     @Test
@@ -113,13 +115,13 @@ class TransactionKotlinTest : LitePalTestCase() {
             var studentFromDb = LitePal.find<Student>(studentId.toLong())
             Assert.assertNotNull(studentFromDb)
             Assert.assertEquals("Tony", studentFromDb!!.name)
-            Assert.assertEquals(23, studentFromDb.age.toLong())
+            Assert.assertEquals(23, studentFromDb!!.age.toLong())
             val updateModel = Student()
             updateModel.age = 25
             var rowsAffected = updateModel.update(studentId.toLong())
             Assert.assertEquals(1, rowsAffected.toLong())
             studentFromDb = LitePal.find(Student::class.java, studentId.toLong())
-            Assert.assertEquals(25, studentFromDb.age.toLong())
+            Assert.assertEquals(25, studentFromDb!!.age.toLong())
             rowsAffected = tony.delete()
             Assert.assertEquals(1, rowsAffected.toLong())
             studentFromDb = LitePal.find(Student::class.java, studentId.toLong())
@@ -147,13 +149,13 @@ class TransactionKotlinTest : LitePalTestCase() {
             var studentFromDb = LitePal.find<Student>(studentId.toLong())
             Assert.assertNotNull(studentFromDb)
             Assert.assertEquals("Tony", studentFromDb!!.name)
-            Assert.assertEquals(23, studentFromDb.age.toLong())
+            Assert.assertEquals(23, studentFromDb!!.age.toLong())
             val updateModel = Student()
             updateModel.age = 25
             var rowsAffected = updateModel.update(studentId.toLong())
             Assert.assertEquals(1, rowsAffected.toLong())
             studentFromDb = LitePal.find(Student::class.java, studentId.toLong())
-            Assert.assertEquals(25, studentFromDb.age.toLong())
+            Assert.assertEquals(25, studentFromDb!!.age.toLong())
             rowsAffected = tony.delete()
             Assert.assertEquals(1, rowsAffected.toLong())
             studentFromDb = LitePal.find(Student::class.java, studentId.toLong())
@@ -168,25 +170,51 @@ class TransactionKotlinTest : LitePalTestCase() {
         val studentFromDb = LitePal.find<Student>(lastId.toLong())
         Assert.assertNotNull(studentFromDb)
         Assert.assertEquals("Tony", studentFromDb!!.name)
-        Assert.assertEquals(23, studentFromDb.age.toLong())
+        Assert.assertEquals(23, studentFromDb!!.age.toLong())
     }
 
     @Test
     fun testTransactionWithException() {
         val book = Book()
-        LitePal.runInTransaction {
-            book.bookName = "First Line of Android"
-            book.pages = 700
-            Assert.assertTrue(book.save())
-            val bookFromDb = LitePal.find(Book::class.java, book.id)
-            Assert.assertEquals("First Line of Android", bookFromDb.bookName)
-            Assert.assertEquals(700L, bookFromDb.pages.toInt().toLong())
-            if (true) throw NullPointerException("just throw to fail the transaction")
-            true
+        expectFailureSilently {
+            LitePal.runInTransaction {
+                book.bookName = "First Line of Android"
+                book.pages = 700
+                Assert.assertTrue(book.save())
+                val bookFromDb = LitePal.find(Book::class.java, book.id)!!
+                Assert.assertEquals("First Line of Android", bookFromDb.bookName)
+                Assert.assertEquals(700L, bookFromDb.pages!!.toInt().toLong())
+                if (true) throw NullPointerException("just throw to fail the transaction")
+                true
+            }
         }
-        Assert.assertTrue(book.isSaved)
+        Assert.assertTrue(book.isSaved())
         val bookFromDb = LitePal.find(Book::class.java, book.id)
         Assert.assertNull(bookFromDb)
+    }
+
+    @Test
+    fun testTransactionWithAssertionErrorShouldRollbackAndRecover() {
+        val rollbackMarker = "assertion_tx_${System.currentTimeMillis()}"
+        expectFailureSilently {
+            LitePal.runInTransaction {
+                val book = Book()
+                book.bookName = rollbackMarker
+                book.pages = 256
+                Assert.assertTrue(book.save())
+                throw AssertionError("force rollback for transaction test")
+            }
+        }
+
+        val rollbackCount = LitePal.where("bookname = ?", rollbackMarker).count(Book::class.java)
+        Assert.assertEquals(0, rollbackCount)
+
+        val sanityBook = Book()
+        sanityBook.bookName = "${rollbackMarker}_after"
+        sanityBook.pages = 512
+        Assert.assertTrue(sanityBook.save())
+        val sanityBookFromDb = LitePal.find(Book::class.java, sanityBook.id)
+        Assert.assertNotNull(sanityBookFromDb)
     }
 
 }

@@ -1,3 +1,4 @@
+docs
 .gradle
 gradle.properties
 /local.properties
@@ -5,9 +6,11 @@ gradle.properties
 /.idea/libraries
 .DS_Store
 /build
+**/build/
 bin
 tmp
 gen
+gradle/gradle-daemon-jvm.properties
 
 #################
 ## #IntelliJ IDEA

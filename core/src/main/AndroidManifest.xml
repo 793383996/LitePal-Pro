@@ -1,7 +1,5 @@
-<manifest package="org.litepal">
+<manifest>
 
-    <application>
-
-    </application>
+    <application />
 
 </manifest>

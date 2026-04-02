@@ -76,6 +76,6 @@
         <storage value="external" />
     -->
 
-    <storage value="external" />
+    <storage value="internal" />
 
 </litepal>
