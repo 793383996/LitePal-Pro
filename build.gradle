@@ -174,3 +174,49 @@ tasks.register('verifyProcessorNegativeCases') {
         }
     }
 }
+
+tasks.register('verifyGeneratedOnlyRuntimeGuards') {
+    group = 'verification'
+    description = 'Fail build if core main-source reintroduces reflection or fallback hooks.'
+
+    doLast {
+        def checks = [
+            [
+                path: 'core/src/main/java',
+                token: 'recordReflectionFallback(',
+                skipPrefix: 'fun recordReflectionFallback('
+            ],
+            [path: 'core/src/main/java', token: 'Class.forName('],
+            [path: 'core/src/main/java', token: 'java.lang.reflect'],
+            [path: 'core/src/main/java', token: 'declaredFields'],
+            [path: 'core/src/main/java', token: 'getDeclaredField(']
+        ]
+        def violations = []
+        checks.each { check ->
+            def srcDir = new File(rootProject.projectDir, check.path)
+            if (!srcDir.exists()) {
+                return
+            }
+            fileTree(srcDir) {
+                include '**/*.kt'
+            }.files.each { sourceFile ->
+                int lineNo = 0
+                sourceFile.eachLine { line ->
+                    lineNo++
+                    if (line.contains(check.token)) {
+                        def isDeclaration = check.skipPrefix != null && line.trim().startsWith(check.skipPrefix)
+                        if (isDeclaration) {
+                            return
+                        }
+                        violations.add("${sourceFile.absolutePath}:${lineNo} contains '${check.token}'")
+                    }
+                }
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException(
+                "Generated-only runtime guard violations detected:\n" + violations.join('\n')
+            )
+        }
+    }
+}

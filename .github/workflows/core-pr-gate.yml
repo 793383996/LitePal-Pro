@@ -47,6 +47,7 @@ jobs:
             :core:assembleDebug \
             :core:lint \
             :core:testDebugUnitTest \
+            verifyGeneratedOnlyRuntimeGuards \
             verifyKspKaptGeneratedParity \
             verifyProcessorNegativeCases \
             :core:publishReleasePublicationToMavenLocal \

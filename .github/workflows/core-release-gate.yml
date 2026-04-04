@@ -36,6 +36,7 @@ jobs:
           ./gradlew \
             :compiler-common:test \
             :core:testDebugUnitTest \
+            verifyGeneratedOnlyRuntimeGuards \
             verifyKspKaptGeneratedParity \
             verifyProcessorNegativeCases \
             :core:verifyReleasePublishCredentials \
