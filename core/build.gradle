@@ -1,5 +1,6 @@
 plugins {
     id 'com.android.library'
+    id 'com.google.devtools.ksp'
     id 'maven-publish'
     id 'signing'
 }
@@ -202,6 +203,7 @@ tasks.matching { task ->
 
 dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime:2.8.7'
+    kspAndroidTest project(':compiler-ksp')
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.robolectric:robolectric:4.16.1'
