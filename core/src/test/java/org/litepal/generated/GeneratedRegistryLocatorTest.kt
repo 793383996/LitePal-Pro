@@ -3,9 +3,7 @@ package org.litepal.generated
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.assertNull
 import org.junit.Test
-import org.litepal.GeneratedMetadataMode
 import org.litepal.LitePalRuntime
 import org.litepal.LitePalRuntimeOptions
 
@@ -19,16 +17,12 @@ class GeneratedRegistryLocatorTest {
     }
 
     @Test
-    fun registryShouldBeAbsentWhenNoGeneratedClassProvided() {
+    fun hasRegistryShouldReturnFalseWhenNoGeneratedClassProvided() {
         assertFalse(GeneratedRegistryLocator.hasRegistry())
-        assertNull(GeneratedRegistryLocator.registry())
     }
 
     @Test
-    fun registryShouldFailFastWhenRequiredModeEnabled() {
-        LitePalRuntime.setRuntimeOptions(
-            LitePalRuntimeOptions(generatedMetadataMode = GeneratedMetadataMode.REQUIRED)
-        )
+    fun registryShouldFailFastWhenGeneratedRegistryMissing() {
         System.setProperty("litepal.generated.registry", "org.litepal.generated.NotFoundRegistry")
         GeneratedRegistryLocator.resetForTesting()
 
@@ -39,25 +33,5 @@ class GeneratedRegistryLocatorTest {
             thrown = t
         }
         assertTrue(thrown is IllegalStateException)
-    }
-
-    @Test
-    fun registryShouldFallbackToNullWhenAutoModeAndRegistryMissing() {
-        LitePalRuntime.setRuntimeOptions(
-            LitePalRuntimeOptions(generatedMetadataMode = GeneratedMetadataMode.AUTO)
-        )
-        System.setProperty("litepal.generated.registry", "org.litepal.generated.NotFoundRegistry")
-        GeneratedRegistryLocator.resetForTesting()
-
-        var thrown: Throwable? = null
-        var registry: LitePalGeneratedRegistry? = null
-        try {
-            registry = GeneratedRegistryLocator.registry()
-        } catch (t: Throwable) {
-            thrown = t
-        }
-
-        assertTrue("unexpected throwable=$thrown", thrown == null)
-        assertNull(registry)
     }
 }

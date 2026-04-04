@@ -21,11 +21,10 @@ rootProject.name = "LitePal-Pro"
 include(
         ":sample",
         ":core",
-        ":compat-3x-api",
-        ":compat-3x-config",
-        ":compat-3x-schema",
-        ":compat-3x-tools",
         ":compiler-common",
         ":compiler-ksp",
-        ":compiler-kapt"
+        ":compiler-kapt",
+        ":fixture-runtime-stubs",
+        ":fixture-ksp-consumer",
+        ":fixture-kapt-consumer"
 )

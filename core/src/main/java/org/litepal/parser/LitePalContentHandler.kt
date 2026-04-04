@@ -58,12 +58,6 @@ class LitePalContentHandler : DefaultHandler() {
                     litePalAttr.version = attributes.getValue(i).trim().toInt()
                 }
             }
-        } else if (LitePalParser.NODE_MAPPING.equals(safeLocalName, ignoreCase = true)) {
-            for (i in 0 until attributes.length) {
-                if (LitePalParser.ATTR_CLASS.equals(attributes.getLocalName(i), ignoreCase = true)) {
-                    litePalAttr.addClassName(attributes.getValue(i).trim())
-                }
-            }
         } else if (LitePalParser.NODE_CASES.equals(safeLocalName, ignoreCase = true)) {
             for (i in 0 until attributes.length) {
                 if (LitePalParser.ATTR_VALUE.equals(attributes.getLocalName(i), ignoreCase = true)) {

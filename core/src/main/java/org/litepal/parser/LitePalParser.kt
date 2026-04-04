@@ -90,8 +90,6 @@ class LitePalParser private constructor() {
                             litePalConfig.dbName = xmlPullParser.getAttributeValue("", ATTR_VALUE)
                         } else if (NODE_VERSION == nodeName) {
                             litePalConfig.version = xmlPullParser.getAttributeValue("", ATTR_VALUE).toInt()
-                        } else if (NODE_MAPPING == nodeName) {
-                            litePalConfig.addClassName(xmlPullParser.getAttributeValue("", ATTR_CLASS))
                         } else if (NODE_CASES == nodeName) {
                             litePalConfig.cases = xmlPullParser.getAttributeValue("", ATTR_VALUE)
                         } else if (NODE_STORAGE == nodeName) {

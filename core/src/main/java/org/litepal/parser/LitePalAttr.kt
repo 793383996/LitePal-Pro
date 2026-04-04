@@ -36,10 +36,7 @@ class LitePalAttr private constructor() {
     fun getClassNames(): MutableList<String> {
         val list = classNames ?: mutableListOf<String>().also { classNames = it }
         if (list.isEmpty()) {
-            val anchorEntities = GeneratedRegistryLocator.anchorEntities()
-            if (anchorEntities.isNotEmpty()) {
-                list.addAll(anchorEntities)
-            }
+            list.addAll(loadAnchorEntitiesOrThrow())
         }
         if (!list.contains("org.litepal.model.Table_Schema")) {
             list.add("org.litepal.model.Table_Schema")
@@ -103,26 +100,26 @@ class LitePalAttr private constructor() {
 
         private fun loadLitePalXMLConfiguration() {
             val target = litePalAttr ?: return
+            target.setClassNames(loadAnchorEntitiesOrThrow())
             if (BaseUtility.isLitePalXMLExists()) {
                 val config = LitePalParser.parseLitePalConfiguration()
                 target.dbName = config.dbName
                 target.version = config.version
-                val anchorEntities = GeneratedRegistryLocator.anchorEntities()
-                if (anchorEntities.isNotEmpty()) {
-                    val xmlEntities = config.getClassNames()
-                    if (xmlEntities.isNotEmpty() && xmlEntities.toSet() != anchorEntities.toSet()) {
-                        LitePalLog.w(
-                            "LitePalAttr",
-                            "litepal.xml mapping differs from generated schema anchor; anchor entities take precedence."
-                        )
-                    }
-                    target.setClassNames(anchorEntities)
-                } else {
-                    target.setClassNames(config.getClassNames())
-                }
                 target.cases = config.cases
                 target.storage = config.storage
             }
+        }
+
+        private fun loadAnchorEntitiesOrThrow(): List<String> {
+            val anchorEntities = GeneratedRegistryLocator.anchorEntities()
+            if (anchorEntities.isNotEmpty()) {
+                return anchorEntities
+            }
+            LitePalLog.e("LitePalAttr", "Missing generated anchor entities.")
+            throw IllegalStateException(
+                "LitePal requires generated metadata from @LitePalSchemaAnchor. " +
+                    "Please configure KSP/KAPT and declare exactly one anchor."
+            )
         }
 
         @JvmStatic

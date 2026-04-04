@@ -7,9 +7,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.litepal.LitePal
-import org.litepal.LitePalErrorPolicy
 import org.litepal.LitePalRuntime
 import org.litepal.LitePalRuntimeOptions
+import org.litepal.SchemaValidationMode
 import org.litepal.crud.LitePalSupport
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
@@ -26,7 +26,6 @@ class SchemaValidationGateTest {
     fun tearDown() {
         System.clearProperty("litepal.generated.registry")
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.COMPAT)
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions())
     }
 
@@ -37,7 +36,7 @@ class SchemaValidationGateTest {
 
         System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.STRICT)
+        LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
         try {
@@ -51,13 +50,13 @@ class SchemaValidationGateTest {
     }
 
     @Test
-    fun validate_shouldNotThrowInCompatModeWhenColumnMissing() {
+    fun validate_shouldNotThrowInLogModeWhenColumnMissing() {
         val db = SQLiteDatabase.create(null)
         db.execSQL("create table if not exists User (id integer primary key autoincrement, name text)")
 
         System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.COMPAT)
+        LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.LOG))
 
         var thrown: Throwable? = null
         try {
@@ -77,7 +76,7 @@ class SchemaValidationGateTest {
 
         System.setProperty("litepal.generated.registry", DefaultRequiredRegistry::class.java.name)
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.STRICT)
+        LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
         try {
@@ -109,7 +108,7 @@ class SchemaValidationGateTest {
 
         System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.STRICT)
+        LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
         try {
@@ -129,7 +128,7 @@ class SchemaValidationGateTest {
 
         System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.STRICT)
+        LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
         var markerCount = 0
@@ -168,7 +167,7 @@ class SchemaValidationGateTest {
 
         System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
         GeneratedRegistryLocator.resetForTesting()
-        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.STRICT)
+        LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
         var storedVersion = -1
@@ -281,3 +280,4 @@ class SchemaValidationGateTest {
 
     class TestEntity : LitePalSupport()
 }
+

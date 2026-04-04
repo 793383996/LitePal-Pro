@@ -567,7 +567,7 @@ If you find any bug when using LitePal, please report **[here](https://github.co
  * Kotlin first upgrade and toolchain refresh.
  * Remove built-in async APIs in Kotlin layer. Use your own coroutine/executor.
  * Introduce safer schema migration policy for unique/not-null upgrades.
- * Add 3.x compatibility helper modules (`compat-3x-*`).
+ * Remove legacy 3.x compatibility helper modules (`compat-3x-*`) from the publish surface.
 
 ### 3.2.3
  * Support database index by adding @Column(index = true) on field.

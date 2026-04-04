@@ -44,48 +44,50 @@ object Connector {
 
     @JvmStatic
     fun getWritableDatabase(): SQLiteDatabase {
-        repeat(MAX_CONFIG_EPOCH_RETRY) { attempt ->
-            val epochBefore = Operator.currentDbConfigEpoch()
-            val database = openWritableDatabaseWithScheduling()
-            Operator.flushPendingDatabaseEvents()
-            val epochAfter = Operator.currentDbConfigEpoch()
-            if (epochAfter == epochBefore) {
-                Operator.validateSchemaIfNeeded(database, epochAfter)
-                return database
-            }
-            LitePalLog.w(
-                TAG,
-                "Database config changed during open/flush (epoch $epochBefore -> $epochAfter), retrying (${attempt + 1}/$MAX_CONFIG_EPOCH_RETRY)."
-            )
-        }
-        LitePalLog.w(
-            TAG,
-            "Database config keeps changing after $MAX_CONFIG_EPOCH_RETRY retries; returning latest reopened database."
-        )
-        var fallbackEpoch = Operator.currentDbConfigEpoch()
-        var fallbackDatabase = openWritableDatabaseWithScheduling()
-        Operator.flushPendingDatabaseEvents()
-        var epochAfterFallback = Operator.currentDbConfigEpoch()
-        if (epochAfterFallback != fallbackEpoch) {
-            LitePalLog.w(
-                TAG,
-                "Database config changed again in fallback open/flush (epoch $fallbackEpoch -> $epochAfterFallback)."
-            )
-            fallbackEpoch = epochAfterFallback
-            fallbackDatabase = openWritableDatabaseWithScheduling()
-            Operator.flushPendingDatabaseEvents()
-            val epochAfterFinalReopen = Operator.currentDbConfigEpoch()
-            if (epochAfterFinalReopen != fallbackEpoch) {
+        return LitePalRuntime.executeOnTransactionExecutor {
+            repeat(MAX_CONFIG_EPOCH_RETRY) { attempt ->
+                val epochBefore = Operator.currentDbConfigEpoch()
+                val database = openWritableDatabaseWithScheduling()
+                Operator.flushPendingDatabaseEvents()
+                val epochAfter = Operator.currentDbConfigEpoch()
+                if (epochAfter == epochBefore) {
+                    Operator.validateSchemaIfNeeded(database, epochAfter)
+                    return@executeOnTransactionExecutor database
+                }
                 LitePalLog.w(
                     TAG,
-                    "Database config changed again after final fallback reopen (epoch $fallbackEpoch -> $epochAfterFinalReopen)."
+                    "Database config changed during open/flush (epoch $epochBefore -> $epochAfter), retrying (${attempt + 1}/$MAX_CONFIG_EPOCH_RETRY)."
                 )
             }
-            Operator.validateSchemaIfNeeded(fallbackDatabase, epochAfterFinalReopen)
-            return fallbackDatabase
+            LitePalLog.w(
+                TAG,
+                "Database config keeps changing after $MAX_CONFIG_EPOCH_RETRY retries; returning latest reopened database."
+            )
+            var fallbackEpoch = Operator.currentDbConfigEpoch()
+            var fallbackDatabase = openWritableDatabaseWithScheduling()
+            Operator.flushPendingDatabaseEvents()
+            var epochAfterFallback = Operator.currentDbConfigEpoch()
+            if (epochAfterFallback != fallbackEpoch) {
+                LitePalLog.w(
+                    TAG,
+                    "Database config changed again in fallback open/flush (epoch $fallbackEpoch -> $epochAfterFallback)."
+                )
+                fallbackEpoch = epochAfterFallback
+                fallbackDatabase = openWritableDatabaseWithScheduling()
+                Operator.flushPendingDatabaseEvents()
+                val epochAfterFinalReopen = Operator.currentDbConfigEpoch()
+                if (epochAfterFinalReopen != fallbackEpoch) {
+                    LitePalLog.w(
+                        TAG,
+                        "Database config changed again after final fallback reopen (epoch $fallbackEpoch -> $epochAfterFinalReopen)."
+                    )
+                }
+                Operator.validateSchemaIfNeeded(fallbackDatabase, epochAfterFinalReopen)
+                return@executeOnTransactionExecutor fallbackDatabase
+            }
+            Operator.validateSchemaIfNeeded(fallbackDatabase, epochAfterFallback)
+            fallbackDatabase
         }
-        Operator.validateSchemaIfNeeded(fallbackDatabase, epochAfterFallback)
-        return fallbackDatabase
     }
 
     @JvmStatic

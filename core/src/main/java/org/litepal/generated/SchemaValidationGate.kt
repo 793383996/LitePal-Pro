@@ -3,6 +3,7 @@ package org.litepal.generated
 import android.database.sqlite.SQLiteDatabase
 import android.content.ContentValues
 import org.litepal.LitePalRuntime
+import org.litepal.SchemaValidationMode
 import org.litepal.tablemanager.model.ColumnModel
 import org.litepal.tablemanager.model.TableModel
 import org.litepal.util.BaseUtility
@@ -30,7 +31,10 @@ object SchemaValidationGate {
 
     @JvmStatic
     fun validate(database: SQLiteDatabase) {
-        val registry = GeneratedRegistryLocator.registry() ?: return
+        val registry = GeneratedRegistryLocator.registry()
+            ?: throw IllegalStateException(
+                "Generated metadata is REQUIRED but no LitePal generated registry was found."
+            )
         val entityMetas = registry.entityMetasByClassName().values
         if (entityMetas.isEmpty()) {
             return
@@ -68,7 +72,7 @@ object SchemaValidationGate {
         val issueSummary = issues.take(12).joinToString(separator = ",")
         val suffix = if (issues.size > 12) ",more=${issues.size - 12}" else ""
         val message = "Schema mismatch detected. issues=[$issueSummary$suffix], expectedHash=${registry.schemaHash}."
-        if (LitePalRuntime.shouldThrowOnError()) {
+        if (LitePalRuntime.getRuntimeOptions().schemaValidationMode == SchemaValidationMode.STRICT) {
             throw IllegalStateException(message)
         }
         LitePalLog.w(TAG, message)
