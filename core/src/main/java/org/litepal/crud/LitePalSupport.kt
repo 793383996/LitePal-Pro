@@ -60,7 +60,7 @@ open class LitePalSupport protected constructor() {
                 val db = Connector.getDatabase()
                 db.beginTransaction()
                 try {
-                    val updateHandler = UpdateHandler(Connector.getDatabase())
+                    val updateHandler = UpdateHandler(db)
                     val rowsAffected = updateHandler.onUpdate(this, id)
                     getFieldsToSetToDefault().clear()
                     db.setTransactionSuccessful()
@@ -81,7 +81,7 @@ open class LitePalSupport protected constructor() {
                 val db = Connector.getDatabase()
                 db.beginTransaction()
                 try {
-                    val updateHandler = UpdateHandler(Connector.getDatabase())
+                    val updateHandler = UpdateHandler(db)
                     val rowsAffected = updateHandler.onUpdateAll(this, *conditions)
                     getFieldsToSetToDefault().clear()
                     db.setTransactionSuccessful()
