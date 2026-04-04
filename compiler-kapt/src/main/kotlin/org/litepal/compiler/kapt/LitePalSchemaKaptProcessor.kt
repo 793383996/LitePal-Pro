@@ -28,6 +28,8 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
 
     private lateinit var processingEnvRef: ProcessingEnvironment
     private var hasCompilationError = false
+    private var generationCompleted = false
+    private var anchorObserved = false
 
     override fun init(processingEnv: ProcessingEnvironment) {
         super.init(processingEnv)
@@ -41,7 +43,17 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
     }
 
     override fun process(annotations: MutableSet<out TypeElement>, roundEnv: RoundEnvironment): Boolean {
+        if (generationCompleted) {
+            return false
+        }
         if (roundEnv.processingOver()) {
+            if (!anchorObserved) {
+                processingEnvRef.messager.printMessage(
+                    Diagnostic.Kind.ERROR,
+                    "LitePal requires exactly one @LitePalSchemaAnchor. None found."
+                )
+            }
+            generationCompleted = true
             return false
         }
 
@@ -51,22 +63,22 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 Diagnostic.Kind.ERROR,
                 "Unable to resolve @LitePalSchemaAnchor type in classpath."
             )
+            generationCompleted = true
             return false
         }
         val anchors = roundEnv.getElementsAnnotatedWith(anchorElementType)
 
         if (anchors.isEmpty()) {
-            processingEnvRef.messager.printMessage(
-                Diagnostic.Kind.ERROR,
-                "LitePal requires exactly one @LitePalSchemaAnchor. None found."
-            )
+            // APT may run multiple rounds; wait until processingOver() to issue the missing-anchor error.
             return false
         }
+        anchorObserved = true
         if (anchors.size > 1) {
             processingEnvRef.messager.printMessage(
                 Diagnostic.Kind.ERROR,
                 "LitePal requires exactly one @LitePalSchemaAnchor. Found ${anchors.size}."
             )
+            generationCompleted = true
             return false
         }
 
@@ -80,6 +92,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 "Unable to resolve @LitePalSchemaAnchor annotation values.",
                 anchor
             )
+            generationCompleted = true
             return false
         }
 
@@ -91,6 +104,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 "@LitePalSchemaAnchor must declare non-empty entities.",
                 anchor
             )
+            generationCompleted = true
             return false
         }
 
@@ -115,9 +129,11 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 "No valid entities resolved for @LitePalSchemaAnchor.",
                 anchor
             )
+            generationCompleted = true
             return false
         }
         if (hasCompilationError) {
+            generationCompleted = true
             return true
         }
 
@@ -128,6 +144,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
         )
 
         writeGeneratedArtifacts(model)
+        generationCompleted = true
         return true
     }
 

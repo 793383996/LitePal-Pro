@@ -138,10 +138,9 @@ tasks.register('verifyProcessorNegativeCases') {
             def args = [
                 gradleWrapper,
                 '-p', caseDir.absolutePath,
-                'clean',
-                'build',
-                '--stacktrace',
-                '--no-daemon'
+                // compileKotlin is sufficient to trigger KSP/KAPT processor diagnostics.
+                'compileKotlin',
+                '--stacktrace'
             ]
             def processBuilder = new ProcessBuilder(args)
             processBuilder.directory(rootProject.projectDir)

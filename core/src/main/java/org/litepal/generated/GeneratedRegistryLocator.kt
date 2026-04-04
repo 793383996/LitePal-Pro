@@ -88,6 +88,9 @@ object GeneratedRegistryLocator {
                 )
             }
             first
+        } catch (e: IllegalStateException) {
+            // Keep explicit cardinality/configuration diagnostics for callers.
+            throw e
         } catch (t: Throwable) {
             LitePalLog.e(TAG, "Failed to load generated LitePal registry.", t)
             null

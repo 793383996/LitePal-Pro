@@ -807,7 +807,7 @@ abstract class DataHandler : LitePalBase() {
                 cursor = mDatabase.rawQuery(BaseUtility.changeCase(sql).orEmpty(), args)
                 if (cursor.moveToFirst()) {
                     val ownerIdColumnIndex = cursor.getColumnIndex(baseIdAlias)
-                        if (ownerIdColumnIndex == -1) {
+                    if (ownerIdColumnIndex == -1) {
                         continue
                     }
                     do {
