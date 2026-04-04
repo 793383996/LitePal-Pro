@@ -38,9 +38,8 @@ class LitePalAttr private constructor() {
         if (list.isEmpty()) {
             list.addAll(loadAnchorEntitiesOrThrow())
         }
-        if (!list.contains("org.litepal.model.Table_Schema")) {
-            list.add("org.litepal.model.Table_Schema")
-        }
+        list.removeAll { it == "org.litepal.model.Table_Schema" }
+        list.add(0, "org.litepal.model.Table_Schema")
         return list
     }
 

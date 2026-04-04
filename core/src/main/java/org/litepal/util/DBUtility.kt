@@ -37,6 +37,9 @@ object DBUtility {
     private const val REG_OPERATOR = "\\s*(=|!=|<>|<|>)"
     private const val REG_FUZZY = "\\s+(not\\s+)?(like|between)\\s+"
     private const val REG_COLLECTION = "\\s+(not\\s+)?(in)\\s*\\("
+    private val WHERE_COLUMN_PATTERN: Pattern = Pattern.compile(
+        "(\\w+$REG_OPERATOR|\\w+$REG_FUZZY|\\w+$REG_COLLECTION)"
+    )
     private val CREATE_TABLE_REGEX = Regex(
         "^\\s*create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?([`\"\\[]?[\\w.]+[`\"\\]]?)",
         RegexOption.IGNORE_CASE
@@ -631,10 +634,7 @@ object DBUtility {
             try {
                 val nonNullWhereClause = whereClause ?: return whereClause
                 val convertedWhereClause = StringBuffer()
-                val p = Pattern.compile(
-                    "(\\w+$REG_OPERATOR|\\w+$REG_FUZZY|\\w+$REG_COLLECTION)"
-                )
-                val m = p.matcher(nonNullWhereClause)
+                val m = WHERE_COLUMN_PATTERN.matcher(nonNullWhereClause)
                 while (m.find()) {
                     val matches = m.group()
                     var column = matches.replace("($REG_OPERATOR|$REG_FUZZY|$REG_COLLECTION)".toRegex(), "")

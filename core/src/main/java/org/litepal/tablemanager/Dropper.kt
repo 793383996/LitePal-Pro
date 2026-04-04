@@ -18,17 +18,18 @@ package org.litepal.tablemanager
 
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import org.litepal.tablemanager.model.TableModel
-import org.litepal.util.BaseUtility
 import org.litepal.util.Const
 import org.litepal.util.LitePalLog
+import java.util.Locale
 
 class Dropper : AssociationUpdater() {
 
-    private lateinit var tableModels: Collection<TableModel>
+    private var tableNameLookup: Set<String> = emptySet()
 
     internal override fun createOrUpgradeTable(db: SQLiteDatabase, force: Boolean) {
-        tableModels = getAllTableModels()
+        tableNameLookup = getAllTableModels()
+            .mapNotNull { it.getTableName()?.lowercase(Locale.US) }
+            .toSet()
         this.db = db
         dropTables()
     }
@@ -62,16 +63,8 @@ class Dropper : AssociationUpdater() {
         return dropTableNames
     }
 
-    private fun pickTableNamesFromTableModels(): List<String> {
-        val tableNames = ArrayList<String>()
-        for (tableModel in tableModels) {
-            tableNames.add(tableModel.getTableName()!!)
-        }
-        return tableNames
-    }
-
     private fun shouldDropThisTable(tableName: String, tableType: Int): Boolean {
-        return !BaseUtility.containsIgnoreCases(pickTableNamesFromTableModels(), tableName) &&
+        return !tableNameLookup.contains(tableName.lowercase(Locale.US)) &&
             tableType == Const.TableSchema.NORMAL_TABLE
     }
 }
