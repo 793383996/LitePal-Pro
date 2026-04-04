@@ -5,6 +5,103 @@
 
 4.0 project docs are available in [`docs/`](./docs/README.md).
 
+## 2026-04 Rust Rewrite Assessment (core module)
+
+This section summarizes a practical assessment of "rewriting LitePal core in Rust" based on current code shape and on-device benchmarks.
+
+### Assessment context
+- Assessment date: 2026-04-05
+- Module: `core`
+- Runtime target: Android SQLite ORM pipeline
+- Device used for benchmark collection: `24129PN74C` (Android 16), ADB over TCP (`192.168.1.101:40459`)
+- Core source shape at assessment time:
+  - `core/src/main/java`: 84 Kotlin files, about 10,509 LOC
+  - `core/src/main/java/org/litepal/crud`: 11 files, about 2,984 LOC
+  - `core/src/main/java/org/litepal/tablemanager`: 22 files, about 1,829 LOC
+
+### What was verified in code
+- Runtime now enforces generated metadata/mapping paths as primary runtime behavior (KSP/KAPT generated registry, mapper, binder, property accessor).
+- Build-time runtime guards explicitly prevent reintroducing reflection-heavy fallback APIs into `core` main source.
+- Hot paths still involve:
+  - `SQLiteDatabase` query/update/delete/transaction I/O
+  - Cursor-to-model mapping and association assembly
+  - schema snapshot/pragma introspection on migration and validation paths
+
+In short: the largest historical reflection penalty is already substantially reduced in current architecture. This lowers the performance upside of a language rewrite by itself.
+
+### On-device baseline (collected 2026-04-05)
+
+Metrics come from `CorePerformanceBaselineInstrumentationTest`.
+
+| Scenario | avg(ms) | p95(ms) | sqlCount | failureRate | generatedHitCount | reflectionFallbackCount | mainThreadBlockMs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| cold_open | 12.20 | 10.00 | -1 | 0.0000 | 3 | 0 | 0 |
+| warm_open | 0.00 | 0.00 | -1 | 0.0000 | 3 | 0 | 0 |
+| eager_query | 10.30 | 11.00 | 0 | 0.0000 | 26286 | 0 | 0 |
+| schema_snapshot | 0.70 | 2.00 | 0 | 0.0000 | 3 | 0 | 0 |
+
+Notes:
+- `concurrent_switch_getdb` could not be stably collected on this device due MIUI install policy interruptions (`INSTALL_FAILED_USER_RESTRICTED` / interactive ADB install confirmation flow), not due deterministic ORM functional failures in the collected runs.
+- Benchmarks should be rerun on a CI-friendly device profile (or emulator farm) for release-grade trend gating.
+
+### Estimated gain of a full Rust rewrite
+
+Estimated from current architecture and measured behavior:
+
+| Area | Expected gain range |
+|---|---|
+| End-to-end overall (typical app usage) | about 5% to 15% |
+| Query-heavy workloads (large eager loads) | about 15% to 25% upper bound |
+| Warm open / very small operations | near 0% |
+
+Why not dramatically higher:
+- SQLite I/O and SQL execution dominate many paths.
+- Model mapping still crosses Android runtime boundaries and object models.
+- Rust introduces JNI/FFI boundaries that can offset pure compute wins if API shape is unchanged.
+- Current generated-only runtime design already removed much of the old reflection cost.
+
+### Engineering cost/risk of full Rust rewrite
+- Requires introducing native build/packaging pipeline (`cargo` + Android NDK glue + ABI artifacts).
+- Requires JNI boundary design for ORM object lifecycle, mapping, and transactions.
+- Requires rethinking current KSP/KAPT generated Kotlin mapping ecosystem (or rebuilding equivalent native codegen pipeline).
+- Requires long compatibility validation across:
+  - schema migration semantics
+  - transaction and locking behavior
+  - multi-db switch/listener/preload behavior
+  - strict/compat runtime policy paths
+
+### Recommended high-ROI path before Rust
+
+Before considering a full rewrite, prioritize these optimizations in current Kotlin architecture:
+
+1. Cache cursor column indexes once per query shape in generated mapper code paths.
+2. Reuse prepared statements / reduce per-row `ContentValues` churn in bulk write paths.
+3. Further reduce temporary collection allocations in association and generic batch assembly.
+4. Keep generated-only runtime guard strict and keep reflection counters at zero.
+5. Continue improving schema snapshot/session cache hit rates and migration observability.
+
+These changes usually deliver faster ROI with much lower delivery and compatibility risk.
+
+### Reproduce benchmark runs
+
+```bash
+./gradlew :core:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=org.litepal.stability.CorePerformanceBaselineInstrumentationTest
+```
+
+Run single methods when needed:
+
+```bash
+./gradlew :core:connectedDebugAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.stability.CorePerformanceBaselineInstrumentationTest#baseline_coldAndWarmDatabaseOpen"
+
+./gradlew :core:connectedDebugAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.stability.CorePerformanceBaselineInstrumentationTest#baseline_eagerQueryWithSqlTrace"
+
+./gradlew :core:connectedDebugAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.stability.CorePerformanceBaselineInstrumentationTest#baseline_schemaSnapshotOnLargeSchema"
+```
+
 LitePal is an open source Android library that allows developers to use SQLite database extremely easy. You can finish most of the database operations without writing even a SQL statement, including create or upgrade tables, crud operations, aggregate functions, etc. The setup of LitePal is quite simple as well, you can integrate it into your project in less than 5 minutes. 
 
 Experience the magic right now and have fun!
