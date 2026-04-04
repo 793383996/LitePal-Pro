@@ -37,6 +37,7 @@ jobs:
             :compiler-common:test \
             :core:testDebugUnitTest \
             verifyKspKaptGeneratedParity \
+            verifyProcessorNegativeCases \
             :core:verifyReleasePublishCredentials \
             :core:assembleRelease \
             :core:generatePomFileForReleasePublication \

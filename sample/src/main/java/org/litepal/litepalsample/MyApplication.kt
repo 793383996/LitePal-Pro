@@ -34,11 +34,7 @@ class MyApplication : Application() {
     }
 
     private fun isRunningInstrumentationTest(): Boolean {
-        return try {
-            Class.forName("androidx.test.platform.app.InstrumentationRegistry")
-            true
-        } catch (_: ClassNotFoundException) {
-            false
-        }
+        return javaClass.classLoader
+            ?.getResource("androidx/test/platform/app/InstrumentationRegistry.class") != null
     }
 }

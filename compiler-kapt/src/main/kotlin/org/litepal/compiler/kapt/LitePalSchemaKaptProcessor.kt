@@ -35,7 +35,9 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
     }
 
     override fun getSupportedAnnotationTypes(): MutableSet<String> {
-        return mutableSetOf(SCHEMA_ANCHOR_FQN)
+        // Return "*" to ensure the processor runs even when no anchor is present,
+        // so we can fail fast with explicit diagnostics in that case.
+        return mutableSetOf("*")
     }
 
     override fun process(annotations: MutableSet<out TypeElement>, roundEnv: RoundEnvironment): Boolean {
@@ -44,6 +46,13 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
         }
 
         val anchorElementType = processingEnvRef.elementUtils.getTypeElement(SCHEMA_ANCHOR_FQN)
+        if (anchorElementType == null) {
+            processingEnvRef.messager.printMessage(
+                Diagnostic.Kind.ERROR,
+                "Unable to resolve @LitePalSchemaAnchor type in classpath."
+            )
+            return false
+        }
         val anchors = roundEnv.getElementsAnnotatedWith(anchorElementType)
 
         if (anchors.isEmpty()) {
@@ -435,6 +444,12 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
             "org.litepal.generated",
             "migration-diff-report.txt"
         ).openWriter().use { it.write(migrationReport) }
+
+        filer.createResource(
+            StandardLocation.CLASS_OUTPUT,
+            "",
+            "META-INF/services/org.litepal.generated.LitePalGeneratedRegistry"
+        ).openWriter().use { it.write("org.litepal.generated.LitePalGeneratedRegistryImpl") }
     }
 
     private fun AnnotationMirror.intArg(name: String): Int? {

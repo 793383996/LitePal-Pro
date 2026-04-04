@@ -48,5 +48,6 @@ jobs:
             :core:lint \
             :core:testDebugUnitTest \
             verifyKspKaptGeneratedParity \
+            verifyProcessorNegativeCases \
             :core:publishReleasePublicationToMavenLocal \
             --stacktrace

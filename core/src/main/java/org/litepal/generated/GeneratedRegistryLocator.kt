@@ -2,23 +2,27 @@ package org.litepal.generated
 
 import org.litepal.crud.LitePalSupport
 import org.litepal.util.LitePalLog
+import java.util.ServiceLoader
 import java.util.concurrent.atomic.AtomicBoolean
 
 object GeneratedRegistryLocator {
 
     private const val TAG = "GeneratedRegistryLocator"
-    private const val DEFAULT_REGISTRY_CLASS = "org.litepal.generated.LitePalGeneratedRegistryImpl"
 
     @Volatile
     private var loadedRegistry: LitePalGeneratedRegistry? = null
+    @Volatile
+    private var testingRegistry: LitePalGeneratedRegistry? = null
     private val attempted = AtomicBoolean(false)
 
     @JvmStatic
     fun registry(): LitePalGeneratedRegistry? {
+        testingRegistry?.let { return it }
         if (attempted.get()) {
             return loadedRegistry
         }
         synchronized(this) {
+            testingRegistry?.let { return it }
             if (attempted.get()) {
                 return loadedRegistry
             }
@@ -53,30 +57,37 @@ object GeneratedRegistryLocator {
 
     @JvmStatic
     internal fun resetForTesting() {
+        installRegistryForTesting(null)
+    }
+
+    @JvmStatic
+    internal fun installRegistryForTesting(registry: LitePalGeneratedRegistry?) {
         synchronized(this) {
+            testingRegistry = registry
             loadedRegistry = null
             attempted.set(false)
         }
     }
 
     private fun loadRegistry(): LitePalGeneratedRegistry? {
-        val className = System.getProperty("litepal.generated.registry") ?: DEFAULT_REGISTRY_CLASS
         return try {
-            val clazz = Class.forName(className)
-            val instanceField = clazz.fields.firstOrNull { it.name == "INSTANCE" }
-            val singletonInstance = instanceField?.get(null) as? LitePalGeneratedRegistry
-            if (singletonInstance != null) {
-                return singletonInstance
+            val serviceLoader = ServiceLoader.load(
+                LitePalGeneratedRegistry::class.java,
+                LitePalGeneratedRegistry::class.java.classLoader
+            )
+            val iterator = serviceLoader.iterator()
+            if (!iterator.hasNext()) {
+                LitePalLog.d(TAG, "No generated LitePal registry service found in classpath.")
+                return null
             }
-            if (LitePalGeneratedRegistry::class.java.isAssignableFrom(clazz)) {
-                val constructor = clazz.getDeclaredConstructor()
-                constructor.isAccessible = true
-                return constructor.newInstance() as LitePalGeneratedRegistry
+            val first = iterator.next()
+            if (iterator.hasNext()) {
+                throw IllegalStateException(
+                    "Multiple LitePal generated registries were discovered via ServiceLoader. " +
+                        "Please keep exactly one @LitePalSchemaAnchor in the app classpath."
+                )
             }
-            null
-        } catch (_: ClassNotFoundException) {
-            LitePalLog.d(TAG, "No generated LitePal registry found in classpath.")
-            null
+            first
         } catch (t: Throwable) {
             LitePalLog.e(TAG, "Failed to load generated LitePal registry.", t)
             null

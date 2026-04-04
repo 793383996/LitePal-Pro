@@ -6,12 +6,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.litepal.LitePalRuntime
 import org.litepal.LitePalRuntimeOptions
+import org.litepal.crud.LitePalSupport
 
 class GeneratedRegistryLocatorTest {
 
     @After
     fun tearDown() {
-        System.clearProperty("litepal.generated.registry")
         GeneratedRegistryLocator.resetForTesting()
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions())
     }
@@ -23,9 +23,6 @@ class GeneratedRegistryLocatorTest {
 
     @Test
     fun registryShouldFailFastWhenGeneratedRegistryMissing() {
-        System.setProperty("litepal.generated.registry", "org.litepal.generated.NotFoundRegistry")
-        GeneratedRegistryLocator.resetForTesting()
-
         var thrown: Throwable? = null
         try {
             GeneratedRegistryLocator.registry()
@@ -33,5 +30,21 @@ class GeneratedRegistryLocatorTest {
             thrown = t
         }
         assertTrue(thrown is IllegalStateException)
+    }
+
+    @Test
+    fun registryShouldReturnInstalledRegistryForTests() {
+        GeneratedRegistryLocator.installRegistryForTesting(TestRegistry())
+        assertTrue(GeneratedRegistryLocator.hasRegistry())
+        assertTrue(GeneratedRegistryLocator.registry() is TestRegistry)
+    }
+
+    private class TestRegistry : LitePalGeneratedRegistry {
+        override val schemaVersion: Int = 1
+        override val schemaJson: String = "{}"
+        override val schemaHash: String = "test"
+        override val anchorClassName: String = "test.Anchor"
+        override val anchorEntities: List<String> = emptyList()
+        override fun entityMetasByClassName(): Map<String, EntityMeta<out LitePalSupport>> = emptyMap()
     }
 }

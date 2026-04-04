@@ -25,8 +25,7 @@ class OperatorExecutorRoutingTest {
     @Before
     fun setUp() {
         LitePal.initialize(RuntimeEnvironment.getApplication())
-        System.setProperty("litepal.generated.registry", RoutingTestRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(RoutingTestRegistry())
         LitePal.setRuntimeOptions(
             LitePalRuntimeOptions(
                 allowMainThreadAccess = true,
@@ -44,7 +43,6 @@ class OperatorExecutorRoutingTest {
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions())
         LitePal.useDefault()
         LitePal.deleteDatabase(testDbName)
-        System.clearProperty("litepal.generated.registry")
         GeneratedRegistryLocator.resetForTesting()
     }
 

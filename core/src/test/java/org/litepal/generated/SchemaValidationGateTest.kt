@@ -24,7 +24,6 @@ class SchemaValidationGateTest {
 
     @After
     fun tearDown() {
-        System.clearProperty("litepal.generated.registry")
         GeneratedRegistryLocator.resetForTesting()
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions())
     }
@@ -34,8 +33,7 @@ class SchemaValidationGateTest {
         val db = SQLiteDatabase.create(null)
         db.execSQL("create table if not exists User (id integer primary key autoincrement, name text)")
 
-        System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(StrictValidationRegistry())
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
@@ -54,8 +52,7 @@ class SchemaValidationGateTest {
         val db = SQLiteDatabase.create(null)
         db.execSQL("create table if not exists User (id integer primary key autoincrement, name text)")
 
-        System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(StrictValidationRegistry())
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.LOG))
 
         var thrown: Throwable? = null
@@ -74,8 +71,7 @@ class SchemaValidationGateTest {
         val db = SQLiteDatabase.create(null)
         db.execSQL("create table if not exists User (id integer primary key autoincrement, name text, age integer)")
 
-        System.setProperty("litepal.generated.registry", DefaultRequiredRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(DefaultRequiredRegistry())
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
@@ -106,8 +102,7 @@ class SchemaValidationGateTest {
             arrayOf<Any>("test.Anchor", 1, "test-hash", System.currentTimeMillis())
         )
 
-        System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(StrictValidationRegistry())
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
@@ -126,8 +121,7 @@ class SchemaValidationGateTest {
         val db = SQLiteDatabase.create(null)
         db.execSQL("create table if not exists User (id integer primary key autoincrement, name text, age integer not null)")
 
-        System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(StrictValidationRegistry())
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
@@ -165,8 +159,7 @@ class SchemaValidationGateTest {
             arrayOf<Any>("test.Anchor", 0, "old-hash", System.currentTimeMillis())
         )
 
-        System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(StrictValidationRegistry())
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions(schemaValidationMode = SchemaValidationMode.STRICT))
 
         var thrown: Throwable? = null
@@ -280,4 +273,5 @@ class SchemaValidationGateTest {
 
     class TestEntity : LitePalSupport()
 }
+
 

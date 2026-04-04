@@ -127,6 +127,14 @@ private class LitePalSchemaKspProcessor(
             "txt"
         ).bufferedWriter().use { it.write(migrationReport) }
 
+        codeGenerator.createNewFileByPath(
+            dependencies,
+            "META-INF/services/org.litepal.generated.LitePalGeneratedRegistry",
+            ""
+        ).bufferedWriter().use {
+            it.write("org.litepal.generated.LitePalGeneratedRegistryImpl")
+        }
+
         return emptyList()
     }
 

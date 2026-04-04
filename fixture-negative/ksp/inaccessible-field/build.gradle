@@ -1,0 +1,24 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.3.20'
+    id 'com.google.devtools.ksp' version '2.3.6'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions.jvmTarget = '17'
+}
+
+def repoDir = System.getenv('LITEPAL_REPO_DIR')
+if (repoDir == null || repoDir.trim().isEmpty()) {
+    throw new GradleException('LITEPAL_REPO_DIR is required')
+}
+
+dependencies {
+    implementation files("${repoDir}/fixture-runtime-stubs/build/libs/fixture-runtime-stubs.jar")
+    ksp files("${repoDir}/compiler-ksp/build/libs/compiler-ksp.jar")
+    ksp files("${repoDir}/compiler-common/build/libs/compiler-common.jar")
+}

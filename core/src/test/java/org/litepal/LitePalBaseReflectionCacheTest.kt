@@ -18,13 +18,11 @@ class LitePalBaseReflectionCacheTest {
 
     @Before
     fun setUp() {
-        System.setProperty("litepal.generated.registry", TestGeneratedRegistry::class.java.name)
-        GeneratedRegistryLocator.resetForTesting()
+        GeneratedRegistryLocator.installRegistryForTesting(TestGeneratedRegistry())
     }
 
     @After
     fun tearDown() {
-        System.clearProperty("litepal.generated.registry")
         GeneratedRegistryLocator.resetForTesting()
     }
 

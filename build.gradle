@@ -17,12 +17,12 @@ def normalizeText = { File file ->
     file.getText('UTF-8').replace('\r\n', '\n').trim()
 }
 
-def findGeneratedArtifact = { Project projectRef, String includePattern, String preferredToken = null ->
+def findGeneratedArtifact = { Project projectRef, String includePattern, String preferredToken = null, String requiredPathToken = '/org/litepal/generated/' ->
     def matches = projectRef.fileTree(projectRef.buildDir) {
         include includePattern
     }.files.findAll { file ->
         def normalizedPath = file.absolutePath.replace('\\', '/').toLowerCase(Locale.ROOT)
-        normalizedPath.contains('/org/litepal/generated/')
+        requiredPathToken == null || normalizedPath.contains(requiredPathToken.toLowerCase(Locale.ROOT))
     }
     if (preferredToken != null) {
         def preferred = matches.findAll { file ->
@@ -77,6 +77,11 @@ tasks.register('verifyKspKaptGeneratedParity') {
                 name      : 'migration-report',
                 kspFile   : findGeneratedArtifact(kspProject, '**/migration-diff-report.txt', '/generated/ksp/'),
                 kaptFile  : findGeneratedArtifact(kaptProject, '**/migration-diff-report.txt', '/kapt')
+            ],
+            [
+                name      : 'service-descriptor',
+                kspFile   : findGeneratedArtifact(kspProject, '**/META-INF/services/org.litepal.generated.LitePalGeneratedRegistry', '/generated/ksp/', null),
+                kaptFile  : findGeneratedArtifact(kaptProject, '**/META-INF/services/org.litepal.generated.LitePalGeneratedRegistry', '/kapt', null)
             ]
         ]
 
@@ -88,6 +93,82 @@ tasks.register('verifyKspKaptGeneratedParity') {
                     "Generated artifact mismatch for ${pair.name}.\n" +
                         "ksp=${pair.kspFile}\n" +
                         "kapt=${pair.kaptFile}"
+                )
+            }
+        }
+    }
+}
+
+tasks.register('verifyProcessorNegativeCases') {
+    group = 'verification'
+    description = 'Verify processor compile-time negative cases fail with expected diagnostics.'
+    dependsOn(
+        ':compiler-common:jar',
+        ':compiler-ksp:jar',
+        ':compiler-kapt:jar',
+        ':fixture-runtime-stubs:jar'
+    )
+
+    doLast {
+        def isWindows = System.getProperty('os.name')
+            .toLowerCase(Locale.ROOT)
+            .contains('windows')
+        def gradleWrapper = new File(
+            rootProject.projectDir,
+            isWindows ? 'gradlew.bat' : 'gradlew'
+        ).absolutePath
+        def repoDir = rootProject.projectDir.absolutePath.replace('\\', '/')
+
+        def cases = [
+            [name: 'ksp-no-anchor', dir: 'fixture-negative/ksp/no-anchor', expected: 'LitePal requires exactly one @LitePalSchemaAnchor. None found.'],
+            [name: 'ksp-multi-anchor', dir: 'fixture-negative/ksp/multi-anchor', expected: 'LitePal requires exactly one @LitePalSchemaAnchor. Found 2.'],
+            [name: 'ksp-empty-entities', dir: 'fixture-negative/ksp/empty-entities', expected: '@LitePalSchemaAnchor must declare non-empty entities.'],
+            [name: 'ksp-inaccessible-field', dir: 'fixture-negative/ksp/inaccessible-field', expected: 'must expose a public setter.'],
+            [name: 'kapt-no-anchor', dir: 'fixture-negative/kapt/no-anchor', expected: 'LitePal requires exactly one @LitePalSchemaAnchor. None found.'],
+            [name: 'kapt-multi-anchor', dir: 'fixture-negative/kapt/multi-anchor', expected: 'LitePal requires exactly one @LitePalSchemaAnchor. Found 2.'],
+            [name: 'kapt-empty-entities', dir: 'fixture-negative/kapt/empty-entities', expected: '@LitePalSchemaAnchor must declare non-empty entities.'],
+            [name: 'kapt-inaccessible-field', dir: 'fixture-negative/kapt/inaccessible-field', expected: 'must expose a public setter.']
+        ]
+
+        cases.each { scenario ->
+            def caseDir = new File(rootProject.projectDir, scenario.dir)
+            if (!caseDir.exists()) {
+                throw new GradleException("Negative case directory does not exist: ${caseDir}")
+            }
+            def args = [
+                gradleWrapper,
+                '-p', caseDir.absolutePath,
+                'clean',
+                'build',
+                '--stacktrace',
+                '--no-daemon'
+            ]
+            def processBuilder = new ProcessBuilder(args)
+            processBuilder.directory(rootProject.projectDir)
+            processBuilder.environment().put('LITEPAL_REPO_DIR', repoDir)
+            processBuilder.redirectErrorStream(true)
+            def process = processBuilder.start()
+
+            def output = new StringBuilder()
+            process.inputStream.withReader('UTF-8') { reader ->
+                reader.eachLine { line ->
+                    output.append(line).append('\n')
+                }
+            }
+            def exitCode = process.waitFor()
+            def diagnostics = output.toString()
+
+            if (exitCode == 0) {
+                throw new GradleException(
+                    "Negative case '${scenario.name}' unexpectedly succeeded.\n" +
+                        "dir=${caseDir.absolutePath}"
+                )
+            }
+            if (!diagnostics.contains(scenario.expected)) {
+                throw new GradleException(
+                    "Negative case '${scenario.name}' did fail, but expected diagnostics were not found.\n" +
+                        "expected='${scenario.expected}'\n" +
+                        "output(sample)=\n${diagnostics.take(6000)}"
                 )
             }
         }

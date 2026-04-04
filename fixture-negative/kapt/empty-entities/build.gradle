@@ -1,0 +1,28 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.3.20'
+    id 'org.jetbrains.kotlin.kapt' version '2.3.20'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions.jvmTarget = '17'
+}
+
+kapt {
+    correctErrorTypes = true
+}
+
+def repoDir = System.getenv('LITEPAL_REPO_DIR')
+if (repoDir == null || repoDir.trim().isEmpty()) {
+    throw new GradleException('LITEPAL_REPO_DIR is required')
+}
+
+dependencies {
+    implementation files("${repoDir}/fixture-runtime-stubs/build/libs/fixture-runtime-stubs.jar")
+    kapt files("${repoDir}/compiler-kapt/build/libs/compiler-kapt.jar")
+    kapt files("${repoDir}/compiler-common/build/libs/compiler-common.jar")
+}
