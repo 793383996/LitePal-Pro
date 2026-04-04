@@ -11,5 +11,7 @@ data class GeneratedEntityMeta(
     override val entityFactory: EntityFactory<LitePalSupport>? = null,
     override val fieldBinder: FieldBinder<LitePalSupport>? = null,
     override val cursorMapper: CursorMapper<LitePalSupport>? = null,
-    override val associationMeta: AssociationMeta? = null
+    override val idAccessor: IdAccessor<LitePalSupport>? = null,
+    override val associationMeta: AssociationMeta? = null,
+    override val propertyAccessor: PropertyAccessor<LitePalSupport>? = null
 ) : EntityMeta<LitePalSupport>

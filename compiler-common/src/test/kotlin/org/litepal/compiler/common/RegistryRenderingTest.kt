@@ -16,6 +16,28 @@ class RegistryRenderingTest {
                     tableName = "User",
                     supportedFields = listOf("name", "age"),
                     supportedGenericFields = listOf("tags"),
+                    declaredProperties = listOf(
+                        PropertyModel(
+                            propertyName = "name",
+                            sourceTypeName = "kotlin.String?",
+                            writable = true,
+                            normalizedTypeName = "java.lang.String"
+                        ),
+                        PropertyModel(
+                            propertyName = "age",
+                            sourceTypeName = "kotlin.Int",
+                            writable = true,
+                            normalizedTypeName = "java.lang.Integer"
+                        ),
+                        PropertyModel(
+                            propertyName = "tags",
+                            sourceTypeName = "kotlin.collections.MutableList<kotlin.String>",
+                            writable = true,
+                            normalizedTypeName = "kotlin.collections.MutableList",
+                            collectionType = "LIST",
+                            collectionElementTypeName = "java.lang.String"
+                        )
+                    ),
                     hasNoArgsConstructor = true,
                     persistedFields = listOf(
                         PersistentFieldModel(
@@ -67,6 +89,7 @@ class RegistryRenderingTest {
                     tableName = "Empty",
                     supportedFields = emptyList(),
                     supportedGenericFields = emptyList(),
+                    declaredProperties = emptyList(),
                     hasNoArgsConstructor = true,
                     persistedFields = emptyList()
                 )

@@ -11,5 +11,7 @@ interface EntityMeta<T : LitePalSupport> {
     val entityFactory: EntityFactory<T>?
     val fieldBinder: FieldBinder<T>?
     val cursorMapper: CursorMapper<T>?
+    val idAccessor: IdAccessor<T>?
     val associationMeta: AssociationMeta?
+    val propertyAccessor: PropertyAccessor<T>?
 }

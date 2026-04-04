@@ -1,7 +1,6 @@
 package org.litepal.compiler.common
 
 import java.security.MessageDigest
-import java.util.Locale
 
 object RegistryRendering {
 
@@ -10,7 +9,13 @@ object RegistryRendering {
             val fieldsJson = entity.persistedFields.joinToString(",") { field ->
                 "{\"name\":\"${field.propertyName}\",\"column\":\"${field.columnName}\",\"type\":\"${field.typeName}\",\"columnType\":\"${field.columnType}\",\"nullable\":${field.nullable},\"unique\":${field.unique},\"indexed\":${field.hasIndex},\"defaultValue\":\"${escapeJson(field.defaultValue)}\",\"encrypt\":\"${escapeJson(field.encryptAlgorithm.orEmpty())}\"}"
             }
-            "{\"className\":\"${entity.className}\",\"tableName\":\"${entity.tableName}\",\"fields\":${stringArray(entity.supportedFields)},\"genericFields\":${stringArray(entity.supportedGenericFields)},\"persistedFields\":[${fieldsJson}]}"
+            val genericJson = entity.genericFields.joinToString(",") { generic ->
+                "{\"property\":\"${generic.propertyName}\",\"elementType\":\"${generic.elementTypeName}\",\"collection\":\"${generic.collectionType}\",\"encrypt\":\"${escapeJson(generic.encryptAlgorithm.orEmpty())}\"}"
+            }
+            val relationJson = entity.associationFields.joinToString(",") { relation ->
+                "{\"associated\":\"${relation.associatedClassName}\",\"type\":${relation.associationType},\"holdsFk\":\"${escapeJson(relation.classHoldsForeignKey.orEmpty())}\",\"selfProperty\":\"${relation.selfPropertyName}\",\"selfCollection\":\"${escapeJson(relation.selfCollectionType.orEmpty())}\",\"reverseProperty\":\"${escapeJson(relation.reversePropertyName.orEmpty())}\",\"reverseCollection\":\"${escapeJson(relation.reverseCollectionType.orEmpty())}\"}"
+            }
+            "{\"className\":\"${entity.className}\",\"tableName\":\"${entity.tableName}\",\"fields\":${stringArray(entity.supportedFields)},\"genericFields\":${stringArray(entity.supportedGenericFields)},\"persistedFields\":[${fieldsJson}],\"genericFieldMeta\":[${genericJson}],\"relations\":[${relationJson}]}"
         }
         return "{\"version\":${model.version},\"anchor\":\"${model.anchorClassName}\",\"entities\":[${entitiesJson}]}"
     }
@@ -65,14 +70,62 @@ object RegistryRendering {
                 )
                 """.trimIndent()
             }
+            val genericFieldsLiteral = entity.genericFields.joinToString(",\n") { generic ->
+                """
+                GeneratedGenericFieldMeta(
+                    propertyName = ${toKotlinString(generic.propertyName)},
+                    elementTypeName = ${toKotlinString(generic.elementTypeName)},
+                    collectionType = ${toKotlinString(generic.collectionType)},
+                    encryptAlgorithm = ${generic.encryptAlgorithm?.let { toKotlinString(it) } ?: "null"}
+                )
+                """.trimIndent()
+            }
+            val genericFieldsBlock = if (genericFieldsLiteral.isBlank()) {
+                "listOf()"
+            } else {
+                """
+                listOf(
+                    $genericFieldsLiteral
+                )
+                """.trimIndent()
+            }
+            val relationLiteral = entity.associationFields.joinToString(",\n") { relation ->
+                """
+                AssociationFieldMeta(
+                    associatedClassName = ${toKotlinString(relation.associatedClassName)},
+                    associationType = ${relation.associationType},
+                    classHoldsForeignKey = ${relation.classHoldsForeignKey?.let { toKotlinString(it) } ?: "null"},
+                    selfPropertyName = ${toKotlinString(relation.selfPropertyName)},
+                    selfCollectionType = ${relation.selfCollectionType?.let { toKotlinString(it) } ?: "null"},
+                    reversePropertyName = ${relation.reversePropertyName?.let { toKotlinString(it) } ?: "null"},
+                    reverseCollectionType = ${relation.reverseCollectionType?.let { toKotlinString(it) } ?: "null"}
+                )
+                """.trimIndent()
+            }
+            val relationBlock = if (relationLiteral.isBlank()) {
+                "listOf()"
+            } else {
+                """
+                listOf(
+                    $relationLiteral
+                )
+                """.trimIndent()
+            }
+            val associationMetaBlock = """
+                AssociationMeta(
+                    relations = $relationBlock,
+                    genericFields = $genericFieldsBlock
+                )
+            """.trimIndent()
             val entityFactoryRef = if (entity.hasNoArgsConstructor) {
                 "LitePalGeneratedEntityFactory$index"
             } else {
                 "null"
             }
-            val associationMetaRef = "LitePalGeneratedAssociationMeta$index"
+            val propertyAccessorRef = "LitePalGeneratedPropertyAccessor$index"
             val binderRef = if (entity.persistedFields.isEmpty()) "null" else "LitePalGeneratedFieldBinder$index"
             val mapperRef = if (entity.persistedFields.isEmpty()) "null" else "LitePalGeneratedCursorMapper$index"
+            val idAccessorRef = resolveIdAccessorRef(index, entity)
             """
             GeneratedEntityMeta(
                 className = ${toKotlinString(entity.className)},
@@ -83,7 +136,9 @@ object RegistryRendering {
                 entityFactory = $entityFactoryRef,
                 fieldBinder = $binderRef,
                 cursorMapper = $mapperRef,
-                associationMeta = $associationMetaRef
+                idAccessor = $idAccessorRef,
+                associationMeta = $associationMetaBlock,
+                propertyAccessor = $propertyAccessorRef
             )
             """.trimIndent()
         }.joinToString(",\n")
@@ -100,39 +155,12 @@ object RegistryRendering {
             import org.litepal.util.BaseUtility
             import org.litepal.util.DBUtility
             import org.litepal.util.cipher.CipherUtil
-            import java.lang.reflect.Field
             import java.util.Date
 
             private object LitePalGeneratedSkipValue
 
-            private fun litePalResolveField(className: String, fieldName: String): Field {
-                val fallbackFieldName = if (fieldName.startsWith("is") && fieldName.length > 2) {
-                    val initial = fieldName.substring(2, 3).lowercase()
-                    initial + fieldName.substring(3)
-                } else {
-                    null
-                }
-                var current: Class<*>? = Class.forName(className)
-                while (current != null && current != Any::class.java) {
-                    try {
-                        val field = current.getDeclaredField(fieldName)
-                        field.isAccessible = true
-                        return field
-                    } catch (_: NoSuchFieldException) {
-                        if (!fallbackFieldName.isNullOrBlank()) {
-                            try {
-                                val fallbackField = current.getDeclaredField(fallbackFieldName)
-                                fallbackField.isAccessible = true
-                                return fallbackField
-                            } catch (_: NoSuchFieldException) {
-                                // ignore and continue to parent class
-                            }
-                        }
-                        current = current.superclass
-                    }
-                }
-                error("Unable to resolve field '${'$'}fieldName' for class '${'$'}className'.")
-            }
+            @Suppress("UNCHECKED_CAST")
+            private fun <T> litePalUnsafeCast(value: Any?): T = value as T
 
             private fun litePalResolveColumnName(rawName: String): String {
                 val normalized = if ("_id".equals(rawName, ignoreCase = true) || "id".equals(rawName, ignoreCase = true)) {
@@ -309,7 +337,13 @@ object RegistryRendering {
 
     private fun generateEntityMappingHelpers(index: Int, entity: EntityModel): String {
         val entityFactoryName = "LitePalGeneratedEntityFactory$index"
-        val associationMetaName = "LitePalGeneratedAssociationMeta$index"
+        val propertyAccessorName = "LitePalGeneratedPropertyAccessor$index"
+        val idAccessorName = "LitePalGeneratedIdAccessor$index"
+        val binderName = "LitePalGeneratedFieldBinder$index"
+        val mapperName = "LitePalGeneratedCursorMapper$index"
+        val entityType = entity.className
+        val idField = resolveIdField(entity)
+
         val builder = StringBuilder().apply {
             if (entity.hasNoArgsConstructor) {
                 appendLine("private object $entityFactoryName : EntityFactory<LitePalSupport> {")
@@ -317,18 +351,65 @@ object RegistryRendering {
                 appendLine("}")
                 appendLine()
             }
-            appendLine("private object $associationMetaName : AssociationMeta {")
-            appendLine("    override val description: String = ${toKotlinString("generated:${entity.className}")}")
+            appendLine("private object $propertyAccessorName : PropertyAccessor<LitePalSupport> {")
+            appendLine("    override fun get(model: LitePalSupport, propertyName: String): Any? {")
+            appendLine("        val typedModel = model as $entityType")
+            appendLine("        return when (propertyName) {")
+            if (entity.declaredProperties.isEmpty()) {
+                appendLine(
+                    "            else -> throw IllegalArgumentException(" +
+                        "${toKotlinString("Unknown property for ${entity.className}: ")} + propertyName" +
+                        ")"
+                )
+            } else {
+                entity.declaredProperties.forEach { property ->
+                    appendLine("            ${toKotlinString(property.propertyName)} -> typedModel.${property.propertyName}")
+                }
+                appendLine(
+                    "            else -> throw IllegalArgumentException(" +
+                        "${toKotlinString("Unknown property for ${entity.className}: ")} + propertyName" +
+                        ")"
+                )
+            }
+            appendLine("        }")
+            appendLine("    }")
+            appendLine()
+            appendLine("    override fun set(model: LitePalSupport, propertyName: String, value: Any?) {")
+            appendLine("        val typedModel = model as $entityType")
+            appendLine("        when (propertyName) {")
+            val writableProperties = entity.declaredProperties.filter { it.writable }
+            if (writableProperties.isEmpty()) {
+                appendLine(
+                    "            else -> throw IllegalArgumentException(" +
+                        "${toKotlinString("Unknown or read-only property for ${entity.className}: ")} + propertyName" +
+                        ")"
+                )
+            } else {
+                writableProperties.forEach { property ->
+                    appendLine("            ${toKotlinString(property.propertyName)} -> typedModel.${property.propertyName} = litePalUnsafeCast(value)")
+                }
+                appendLine(
+                    "            else -> throw IllegalArgumentException(" +
+                        "${toKotlinString("Unknown or read-only property for ${entity.className}: ")} + propertyName" +
+                        ")"
+                )
+            }
+            appendLine("        }")
+            appendLine("    }")
             appendLine("}")
+            if (idField != null && isIdTypeSupported(idField.typeName)) {
+                appendLine()
+                appendLine("private object $idAccessorName : IdAccessor<LitePalSupport> {")
+                appendLine("    override fun setId(model: LitePalSupport, id: Long) {")
+                appendLine("        val typedModel = model as $entityType")
+                appendLine("        ${renderIdAssignment("typedModel", idField)}")
+                appendLine("    }")
+                appendLine("}")
+            }
         }
         if (entity.persistedFields.isEmpty()) {
             return builder.toString().trim()
         }
-        val binderName = "LitePalGeneratedFieldBinder$index"
-        val mapperName = "LitePalGeneratedCursorMapper$index"
-        val fieldDecls = entity.persistedFields.mapIndexed { fieldIndex, field ->
-            "private val field$fieldIndex: Field = litePalResolveField(${toKotlinString(entity.className)}, ${toKotlinString(field.propertyName)})"
-        }.joinToString("\n    ")
 
         val writableFieldEntries = entity.persistedFields.mapIndexedNotNull { fieldIndex, field ->
             if (isIdLikeName(field.columnName) || isIdLikeName(field.propertyName)) {
@@ -338,10 +419,10 @@ object RegistryRendering {
             }
         }
 
-        val saveBlocks = writableFieldEntries.mapIndexed { writeIndex, (fieldIndex, field) ->
+        val saveBlocks = writableFieldEntries.mapIndexed { writeIndex, (_, field) ->
             """
             val saveValue$writeIndex = litePalValueForSave(
-                rawValue = field$fieldIndex.get(model),
+                rawValue = typedModel.${field.propertyName},
                 typeName = ${toKotlinString(field.typeName)},
                 defaultValue = ${toKotlinString(field.defaultValue)},
                 encryptAlgorithm = ${field.encryptAlgorithm?.let { toKotlinString(it) } ?: "null"}
@@ -352,10 +433,10 @@ object RegistryRendering {
             """.trimIndent()
         }.joinToString("\n\n        ").ifBlank { "/* no writable non-id fields */" }
 
-        val updateBlocks = writableFieldEntries.mapIndexed { writeIndex, (fieldIndex, field) ->
+        val updateBlocks = writableFieldEntries.mapIndexed { writeIndex, (_, field) ->
             """
             val updateValue$writeIndex = litePalValueForUpdate(
-                rawValue = field$fieldIndex.get(model),
+                rawValue = typedModel.${field.propertyName},
                 typeName = ${toKotlinString(field.typeName)},
                 encryptAlgorithm = ${field.encryptAlgorithm?.let { toKotlinString(it) } ?: "null"}
             )
@@ -378,7 +459,7 @@ object RegistryRendering {
                     } else {
                         rawValue$fieldIndex
                     }
-                    field$fieldIndex.set(model, mappedValue$fieldIndex)
+                    ${renderMapperAssignment("typedModel", field, "mappedValue$fieldIndex")}
                 }
             }
             """.trimIndent()
@@ -386,22 +467,22 @@ object RegistryRendering {
 
         val mappingCode = """
             private object $binderName : FieldBinder<LitePalSupport> {
-                $fieldDecls
-
                 override fun bindForSave(model: LitePalSupport, put: (column: String, value: Any?) -> Unit) {
+                    val typedModel = model as $entityType
                     $saveBlocks
                 }
 
                 override fun bindForUpdate(model: LitePalSupport, put: (column: String, value: Any?) -> Unit) {
+                    val typedModel = model as $entityType
                     $updateBlocks
                 }
             }
 
             private object $mapperName : CursorMapper<LitePalSupport> {
-                $fieldDecls
                 $mapperColumnDecls
 
                 override fun mapFromCursor(model: LitePalSupport, cursor: Cursor) {
+                    val typedModel = model as $entityType
                     $mapperBlocks
                 }
             }
@@ -409,6 +490,70 @@ object RegistryRendering {
         builder.appendLine()
         builder.append(mappingCode)
         return builder.toString().trim()
+    }
+
+    private fun resolveIdAccessorRef(index: Int, entity: EntityModel): String {
+        val idField = resolveIdField(entity) ?: return "null"
+        return if (isIdTypeSupported(idField.typeName)) {
+            "LitePalGeneratedIdAccessor$index"
+        } else {
+            "null"
+        }
+    }
+
+    private fun resolveIdField(entity: EntityModel): PersistentFieldModel? {
+        return entity.persistedFields.firstOrNull { field ->
+            isIdLikeName(field.columnName) || isIdLikeName(field.propertyName)
+        }
+    }
+
+    private fun isIdTypeSupported(typeName: String): Boolean {
+        return when (normalizeTypeToken(typeName)) {
+            "INT", "LONG" -> true
+            else -> false
+        }
+    }
+
+    private fun renderIdAssignment(modelVar: String, field: PersistentFieldModel): String {
+        return when (normalizeTypeToken(field.typeName)) {
+            "INT" -> "$modelVar.${field.propertyName} = id.toInt()"
+            else -> "$modelVar.${field.propertyName} = id"
+        }
+    }
+
+    private fun renderMapperAssignment(
+        modelVar: String,
+        field: PersistentFieldModel,
+        valueVar: String
+    ): String {
+        val target = "$modelVar.${field.propertyName}"
+        return when (normalizeTypeToken(field.typeName)) {
+            "BOOLEAN" -> "$target = when (val value = $valueVar) { is Boolean -> value; is Number -> value.toInt() == 1; is String -> value == \"1\" || value.equals(\"true\", ignoreCase = true); else -> false }"
+            "FLOAT" -> "$target = (($valueVar as? Number)?.toFloat() ?: 0f)"
+            "DOUBLE" -> "$target = (($valueVar as? Number)?.toDouble() ?: 0.0)"
+            "INT" -> "$target = (($valueVar as? Number)?.toInt() ?: 0)"
+            "LONG" -> "$target = (($valueVar as? Number)?.toLong() ?: 0L)"
+            "SHORT" -> "$target = (($valueVar as? Number)?.toShort() ?: 0)"
+            "CHAR" -> "$target = when (val value = $valueVar) { is Char -> value; is String -> value.firstOrNull() ?: '\\u0000'; else -> '\\u0000' }"
+            "DATE" -> "if ($valueVar is Date) { $target = $valueVar }"
+            "STRING" -> "$target = $valueVar.toString()"
+            else -> "$target = $valueVar as ${field.typeName}"
+        }
+    }
+
+    private fun normalizeTypeToken(typeName: String): String {
+        return when (typeName) {
+            "boolean", "java.lang.Boolean", "kotlin.Boolean" -> "BOOLEAN"
+            "float", "java.lang.Float", "kotlin.Float" -> "FLOAT"
+            "double", "java.lang.Double", "kotlin.Double" -> "DOUBLE"
+            "int", "java.lang.Integer", "kotlin.Int" -> "INT"
+            "long", "java.lang.Long", "kotlin.Long" -> "LONG"
+            "short", "java.lang.Short", "kotlin.Short" -> "SHORT"
+            "char", "java.lang.Character", "kotlin.Char" -> "CHAR"
+            "java.lang.String", "kotlin.String" -> "STRING"
+            "java.util.Date" -> "DATE"
+            else -> "OTHER"
+        }
     }
 
     private fun stringArray(values: List<String>): String {

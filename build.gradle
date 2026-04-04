@@ -1,3 +1,5 @@
+import java.util.Locale
+
 plugins {
     id 'com.android.application' version '9.1.0' apply false
     id 'com.android.library' version '9.1.0' apply false
@@ -9,4 +11,85 @@ plugins {
 
 tasks.register('clean', Delete) {
     delete rootProject.layout.buildDirectory
+}
+
+def normalizeText = { File file ->
+    file.getText('UTF-8').replace('\r\n', '\n').trim()
+}
+
+def findGeneratedArtifact = { Project projectRef, String includePattern, String preferredToken = null ->
+    def matches = projectRef.fileTree(projectRef.buildDir) {
+        include includePattern
+    }.files.findAll { file ->
+        def normalizedPath = file.absolutePath.replace('\\', '/').toLowerCase(Locale.ROOT)
+        normalizedPath.contains('/org/litepal/generated/')
+    }
+    if (preferredToken != null) {
+        def preferred = matches.findAll { file ->
+            file.absolutePath.replace('\\', '/').toLowerCase(Locale.ROOT).contains(preferredToken.toLowerCase(Locale.ROOT))
+        }
+        if (!preferred.isEmpty()) {
+            matches = preferred
+        }
+    }
+    if (matches.isEmpty()) {
+        throw new GradleException("Missing generated artifact '${includePattern}' in ${projectRef.path}.")
+    }
+    matches.sort { left, right ->
+        int byTime = (right.lastModified() <=> left.lastModified())
+        if (byTime != 0) {
+            return byTime
+        }
+        return left.absolutePath <=> right.absolutePath
+    }
+    matches.first()
+}
+
+tasks.register('verifyKspKaptGeneratedParity') {
+    group = 'verification'
+    description = 'Verify KSP/KAPT generated registry and schema artifacts are identical.'
+    dependsOn(
+        ':fixture-ksp-consumer:build',
+        ':fixture-kapt-consumer:build'
+    )
+
+    doLast {
+        def kspProject = project(':fixture-ksp-consumer')
+        def kaptProject = project(':fixture-kapt-consumer')
+
+        def artifactPairs = [
+            [
+                name      : 'registry',
+                kspFile   : findGeneratedArtifact(kspProject, '**/LitePalGeneratedRegistryImpl.kt', '/generated/ksp/'),
+                kaptFile  : findGeneratedArtifact(kaptProject, '**/LitePalGeneratedRegistryImpl.kt', '/kapt')
+            ],
+            [
+                name      : 'schema-json',
+                kspFile   : findGeneratedArtifact(kspProject, '**/schema-v*.json', '/generated/ksp/'),
+                kaptFile  : findGeneratedArtifact(kaptProject, '**/schema-v*.json', '/kapt')
+            ],
+            [
+                name      : 'schema-hash',
+                kspFile   : findGeneratedArtifact(kspProject, '**/schema-hash.txt', '/generated/ksp/'),
+                kaptFile  : findGeneratedArtifact(kaptProject, '**/schema-hash.txt', '/kapt')
+            ],
+            [
+                name      : 'migration-report',
+                kspFile   : findGeneratedArtifact(kspProject, '**/migration-diff-report.txt', '/generated/ksp/'),
+                kaptFile  : findGeneratedArtifact(kaptProject, '**/migration-diff-report.txt', '/kapt')
+            ]
+        ]
+
+        artifactPairs.each { pair ->
+            def kspText = normalizeText(pair.kspFile as File)
+            def kaptText = normalizeText(pair.kaptFile as File)
+            if (kspText != kaptText) {
+                throw new GradleException(
+                    "Generated artifact mismatch for ${pair.name}.\n" +
+                        "ksp=${pair.kspFile}\n" +
+                        "kapt=${pair.kaptFile}"
+                )
+            }
+        }
+    }
 }

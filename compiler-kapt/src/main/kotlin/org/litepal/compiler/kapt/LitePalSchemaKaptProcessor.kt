@@ -3,6 +3,8 @@ package org.litepal.compiler.kapt
 import org.litepal.compiler.common.AnchorModel
 import org.litepal.compiler.common.EntityModel
 import org.litepal.compiler.common.PersistentFieldModel
+import org.litepal.compiler.common.PropertyModel
+import org.litepal.compiler.common.RelationshipModeling
 import org.litepal.compiler.common.RegistryRendering
 import javax.annotation.processing.AbstractProcessor
 import javax.annotation.processing.ProcessingEnvironment
@@ -18,12 +20,14 @@ import javax.lang.model.element.TypeElement
 import javax.lang.model.element.VariableElement
 import javax.tools.Diagnostic
 import javax.tools.StandardLocation
+import java.io.File
 
 @SupportedSourceVersion(SourceVersion.RELEASE_17)
 @SupportedOptions()
 class LitePalSchemaKaptProcessor : AbstractProcessor() {
 
     private lateinit var processingEnvRef: ProcessingEnvironment
+    private var hasCompilationError = false
 
     override fun init(processingEnv: ProcessingEnvironment) {
         super.init(processingEnv)
@@ -81,7 +85,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
             return false
         }
 
-        val entities = entityTypeNames.mapNotNull { typeName ->
+        val rawEntities = entityTypeNames.mapNotNull { typeName ->
             val type = processingEnvRef.elementUtils.getTypeElement(typeName)
             if (type == null) {
                 processingEnvRef.messager.printMessage(
@@ -94,6 +98,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 toEntityModel(type)
             }
         }
+        val entities = RelationshipModeling.enrichEntities(rawEntities)
 
         if (entities.isEmpty()) {
             processingEnvRef.messager.printMessage(
@@ -102,6 +107,9 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 anchor
             )
             return false
+        }
+        if (hasCompilationError) {
+            return true
         }
 
         val model = AnchorModel(
@@ -120,7 +128,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
         val hasNoArgsConstructor = hasNoArgsConstructor(typeElement)
 
         val supportedFields = linkedSetOf<String>()
-        val supportedGenericFields = linkedSetOf<String>()
+        val declaredProperties = ArrayList<PropertyModel>()
         val persistedFields = ArrayList<PersistentFieldModel>()
 
         val members = processingEnvRef.elementUtils.getAllMembers(typeElement)
@@ -135,19 +143,45 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
             if (fieldName == "Companion" || fieldName.startsWith("$")) {
                 return@forEach
             }
+            val ownerName = (field.enclosingElement as? TypeElement)
+                ?.qualifiedName
+                ?.toString()
+                .orEmpty()
+            if (isLitePalSupportBoundary(ownerName)) {
+                return@forEach
+            }
             val columnConfig = readColumnConfig(field)
             if (columnConfig.ignore) {
                 return@forEach
             }
             val normalizedTypeName = normalizeTypeName(field.asType().toString())
-            if (isSupportedFieldType(normalizedTypeName)) {
+            val rawTypeName = normalizeRawType(normalizedTypeName)
+            val collectionType = resolveCollectionType(normalizedTypeName)
+            val collectionElementTypeName = normalizeCollectionElementType(normalizedTypeName)
+            if (hasPublicGetter(typeElement, fieldName, normalizedTypeName)) {
+                declaredProperties.add(
+                    PropertyModel(
+                        propertyName = fieldName,
+                        sourceTypeName = field.asType().toString(),
+                        writable = hasPublicSetter(typeElement, fieldName, normalizedTypeName),
+                        normalizedTypeName = rawTypeName,
+                        collectionType = collectionType,
+                        collectionElementTypeName = collectionElementTypeName,
+                        encryptAlgorithm = readEncryptAlgorithm(field)
+                    )
+                )
+            }
+            if (isSupportedFieldType(rawTypeName)) {
+                if (!hasPublicAccessors(typeElement, field, normalizedTypeName)) {
+                    return@forEach
+                }
                 supportedFields.add(fieldName)
                 persistedFields.add(
                     PersistentFieldModel(
                         propertyName = fieldName,
                         columnName = resolveColumnName(fieldName),
-                        typeName = normalizedTypeName,
-                        columnType = mapToColumnType(normalizedTypeName),
+                        typeName = rawTypeName,
+                        columnType = mapToColumnType(rawTypeName),
                         nullable = columnConfig.nullable,
                         unique = columnConfig.unique,
                         hasIndex = columnConfig.indexed,
@@ -156,24 +190,23 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                     )
                 )
             }
-            if (isCollectionType(normalizedTypeName)) {
-                val genericTypeName = normalizeTypeName(
-                    normalizedTypeName.substringAfter("<", "").substringBeforeLast(">", "")
-                )
-                if (isSupportedGenericType(genericTypeName) || genericTypeName == className) {
-                    supportedGenericFields.add(fieldName)
-                }
-            }
         }
 
         return EntityModel(
             className = className,
             tableName = tableName,
-            supportedFields = supportedFields.toList(),
-            supportedGenericFields = supportedGenericFields.toList(),
+            supportedFields = supportedFields.toList().sorted(),
+            supportedGenericFields = emptyList(),
+            declaredProperties = declaredProperties.sortedBy { it.propertyName },
             hasNoArgsConstructor = hasNoArgsConstructor,
-            persistedFields = persistedFields
+            persistedFields = persistedFields.sortedBy { it.propertyName }
         )
+    }
+
+    private fun isLitePalSupportBoundary(className: String): Boolean {
+        return className == LITEPAL_SUPPORT_FQN ||
+            className == "kotlin.Any" ||
+            className == "java.lang.Object"
     }
 
     private fun resolveColumnName(fieldName: String): String {
@@ -192,6 +225,60 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
             return true
         }
         return constructors.any { it.parameters.isEmpty() }
+    }
+
+    private fun hasPublicAccessors(
+        typeElement: TypeElement,
+        field: VariableElement,
+        normalizedTypeName: String
+    ): Boolean {
+        val fieldName = field.simpleName.toString()
+        if (!hasPublicGetter(typeElement, fieldName, normalizedTypeName)) {
+            processingEnvRef.messager.printMessage(
+                Diagnostic.Kind.ERROR,
+                "Persistent field '$fieldName' must expose a public getter. " +
+                    "Please provide public getter/setter accessors.",
+                field
+            )
+            hasCompilationError = true
+            return false
+        }
+
+        if (!hasPublicSetter(typeElement, fieldName, normalizedTypeName)) {
+            processingEnvRef.messager.printMessage(
+                Diagnostic.Kind.ERROR,
+                "Persistent field '$fieldName' must expose a public setter. " +
+                    "Please declare it mutable and provide public getter/setter.",
+                field
+            )
+            hasCompilationError = true
+            return false
+        }
+        return true
+    }
+
+    private fun hasPublicGetter(typeElement: TypeElement, fieldName: String, normalizedTypeName: String): Boolean {
+        val methods = processingEnvRef.elementUtils
+            .getAllMembers(typeElement)
+            .filterIsInstance<ExecutableElement>()
+        val getterNames = getterCandidates(fieldName, normalizedTypeName)
+        return methods.any { method ->
+            method.modifiers.contains(Modifier.PUBLIC) &&
+                method.parameters.isEmpty() &&
+                getterNames.contains(method.simpleName.toString())
+        }
+    }
+
+    private fun hasPublicSetter(typeElement: TypeElement, fieldName: String, normalizedTypeName: String): Boolean {
+        val methods = processingEnvRef.elementUtils
+            .getAllMembers(typeElement)
+            .filterIsInstance<ExecutableElement>()
+        val setterName = setterCandidate(fieldName, normalizedTypeName)
+        return methods.any { method ->
+            method.modifiers.contains(Modifier.PUBLIC) &&
+                method.parameters.size == 1 &&
+                method.simpleName.toString() == setterName
+        }
     }
 
     private fun readColumnConfig(field: VariableElement): ColumnConfig {
@@ -229,6 +316,13 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
 
     private fun normalizeTypeName(typeName: String): String {
         return when (typeName) {
+            "boolean" -> "java.lang.Boolean"
+            "float" -> "java.lang.Float"
+            "double" -> "java.lang.Double"
+            "int" -> "java.lang.Integer"
+            "long" -> "java.lang.Long"
+            "short" -> "java.lang.Short"
+            "char" -> "java.lang.Character"
             "kotlin.Boolean" -> "java.lang.Boolean"
             "kotlin.Float" -> "java.lang.Float"
             "kotlin.Double" -> "java.lang.Double"
@@ -238,6 +332,39 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
             "kotlin.Char" -> "java.lang.Character"
             "kotlin.String" -> "java.lang.String"
             else -> typeName
+        }
+    }
+
+    private fun normalizeRawType(typeName: String): String {
+        return if (typeName.contains("<")) {
+            typeName.substringBefore("<").trim()
+        } else {
+            typeName.trim()
+        }
+    }
+
+    private fun normalizeCollectionElementType(typeName: String): String? {
+        if (!typeName.contains("<") || !typeName.contains(">")) {
+            return null
+        }
+        val raw = typeName.substringAfter("<").substringBeforeLast(">").trim()
+        if (raw.isBlank()) {
+            return null
+        }
+        return normalizeTypeName(raw)
+    }
+
+    private fun resolveCollectionType(typeName: String): String? {
+        return when {
+            typeName.startsWith("java.util.List<") ||
+                typeName.startsWith("kotlin.collections.List<") ||
+                typeName.startsWith("kotlin.collections.MutableList<") -> "LIST"
+
+            typeName.startsWith("java.util.Set<") ||
+                typeName.startsWith("kotlin.collections.Set<") ||
+                typeName.startsWith("kotlin.collections.MutableSet<") -> "SET"
+
+            else -> null
         }
     }
 
@@ -270,8 +397,22 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
         val filer = processingEnvRef.filer
 
         val source = RegistryRendering.generatedRegistrySource(model)
-        val sourceFile = filer.createSourceFile("org.litepal.generated.LitePalGeneratedRegistryImpl")
-        sourceFile.openWriter().use { it.write(source) }
+        val kaptKotlinGeneratedDir = processingEnvRef.options["kapt.kotlin.generated"]
+        if (!kaptKotlinGeneratedDir.isNullOrBlank()) {
+            val outputFile = File(
+                kaptKotlinGeneratedDir,
+                "org/litepal/generated/LitePalGeneratedRegistryImpl.kt"
+            )
+            outputFile.parentFile.mkdirs()
+            outputFile.writeText(source)
+        } else {
+            processingEnvRef.messager.printMessage(
+                Diagnostic.Kind.WARNING,
+                "kapt.kotlin.generated is not configured; fallback to Java source output for LitePalGeneratedRegistryImpl."
+            )
+            val sourceFile = filer.createSourceFile("org.litepal.generated.LitePalGeneratedRegistryImpl")
+            sourceFile.openWriter().use { it.write(source) }
+        }
 
         val schemaJson = RegistryRendering.schemaJson(model)
         val schemaHash = RegistryRendering.schemaHash(schemaJson)
@@ -349,7 +490,49 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
         return typeName.startsWith("java.util.List<") ||
             typeName.startsWith("java.util.Set<") ||
             typeName.startsWith("kotlin.collections.List<") ||
-            typeName.startsWith("kotlin.collections.Set<")
+            typeName.startsWith("kotlin.collections.Set<") ||
+            typeName.startsWith("kotlin.collections.MutableList<") ||
+            typeName.startsWith("kotlin.collections.MutableSet<")
+    }
+
+    private fun getterCandidates(fieldName: String, normalizedTypeName: String): Set<String> {
+        val candidates = LinkedHashSet<String>()
+        if (isBooleanType(normalizedTypeName)) {
+            if (fieldName.startsWith("is") && fieldName.length > 2 && fieldName[2].isUpperCase()) {
+                val suffix = fieldName.substring(2)
+                candidates.add(fieldName)
+                candidates.add("get$suffix")
+            } else {
+                val cap = capitalize(fieldName)
+                candidates.add("is$cap")
+                candidates.add("get$cap")
+            }
+        } else {
+            candidates.add("get${capitalize(fieldName)}")
+        }
+        return candidates
+    }
+
+    private fun setterCandidate(fieldName: String, normalizedTypeName: String): String {
+        if (isBooleanType(normalizedTypeName) &&
+            fieldName.startsWith("is") &&
+            fieldName.length > 2 &&
+            fieldName[2].isUpperCase()
+        ) {
+            return "set${fieldName.substring(2)}"
+        }
+        return "set${capitalize(fieldName)}"
+    }
+
+    private fun isBooleanType(typeName: String): Boolean {
+        return typeName == "boolean" || typeName == "java.lang.Boolean" || typeName == "kotlin.Boolean"
+    }
+
+    private fun capitalize(value: String): String {
+        if (value.isBlank()) {
+            return value
+        }
+        return value.substring(0, 1).uppercase() + value.substring(1)
     }
 
     private data class ColumnConfig(
@@ -362,6 +545,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
 
     companion object {
         private const val SCHEMA_ANCHOR_FQN = "org.litepal.annotation.LitePalSchemaAnchor"
+        private const val LITEPAL_SUPPORT_FQN = "org.litepal.crud.LitePalSupport"
         private const val COLUMN_FQN = "org.litepal.annotation.Column"
         private const val ENCRYPT_FQN = "org.litepal.annotation.Encrypt"
     }

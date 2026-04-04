@@ -16,6 +16,8 @@ import com.google.devtools.ksp.symbol.KSType
 import org.litepal.compiler.common.AnchorModel
 import org.litepal.compiler.common.EntityModel
 import org.litepal.compiler.common.PersistentFieldModel
+import org.litepal.compiler.common.PropertyModel
+import org.litepal.compiler.common.RelationshipModeling
 import org.litepal.compiler.common.RegistryRendering
 import java.util.Locale
 
@@ -31,6 +33,7 @@ private class LitePalSchemaKspProcessor(
 ) : SymbolProcessor {
 
     private var processed = false
+    private var hasCompilationError = false
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
         if (processed) {
@@ -71,8 +74,12 @@ private class LitePalSchemaKspProcessor(
             return emptyList()
         }
 
-        val entities = entityTypes.map { entityDecl ->
+        val rawEntities = entityTypes.map { entityDecl ->
             toEntityModel(entityDecl)
+        }
+        val entities = RelationshipModeling.enrichEntities(rawEntities)
+        if (hasCompilationError) {
+            return emptyList()
         }
 
         val model = AnchorModel(
@@ -129,7 +136,7 @@ private class LitePalSchemaKspProcessor(
         val hasNoArgsConstructor = hasNoArgsConstructor(entityDecl)
 
         val supportedFields = linkedSetOf<String>()
-        val supportedGenericFields = linkedSetOf<String>()
+        val declaredProperties = ArrayList<PropertyModel>()
         val persistedFields = ArrayList<PersistentFieldModel>()
 
         collectPersistedProperties(entityDecl).forEach { property ->
@@ -141,7 +148,28 @@ private class LitePalSchemaKspProcessor(
             val resolvedType = property.type.resolve()
             val rawTypeName = resolvedType.declaration.qualifiedName?.asString().orEmpty()
             val normalizedTypeName = normalizeTypeName(rawTypeName)
+            val collectionType = resolveCollectionType(normalizedTypeName)
+            val genericTypeName = resolvedType.arguments.firstOrNull()?.type?.resolve()
+                ?.declaration?.qualifiedName?.asString()
+                .orEmpty()
+            val normalizedGenericTypeName = normalizeTypeName(genericTypeName)
+            if (hasPublicGetter(property)) {
+                declaredProperties.add(
+                    PropertyModel(
+                        propertyName = propertyName,
+                        sourceTypeName = resolvedType.toString(),
+                        writable = hasPublicSetter(property),
+                        normalizedTypeName = normalizedTypeName,
+                        collectionType = collectionType,
+                        collectionElementTypeName = normalizedGenericTypeName.takeIf { collectionType != null && it.isNotBlank() },
+                        encryptAlgorithm = readEncryptAlgorithm(property)
+                    )
+                )
+            }
             if (isSupportedFieldType(normalizedTypeName)) {
+                if (!hasPublicAccessors(property, normalizedTypeName)) {
+                    return@forEach
+                }
                 supportedFields.add(propertyName)
                 persistedFields.add(
                     PersistentFieldModel(
@@ -157,24 +185,16 @@ private class LitePalSchemaKspProcessor(
                     )
                 )
             }
-            if (isCollectionType(normalizedTypeName)) {
-                val genericTypeName = resolvedType.arguments.firstOrNull()?.type?.resolve()
-                    ?.declaration?.qualifiedName?.asString()
-                    .orEmpty()
-                val normalizedGenericTypeName = normalizeTypeName(genericTypeName)
-                if (isSupportedGenericType(normalizedGenericTypeName) || normalizedGenericTypeName == className) {
-                    supportedGenericFields.add(propertyName)
-                }
-            }
         }
 
         return EntityModel(
             className = className,
             tableName = tableName,
-            supportedFields = supportedFields.toList(),
-            supportedGenericFields = supportedGenericFields.toList(),
+            supportedFields = supportedFields.toList().sorted(),
+            supportedGenericFields = emptyList(),
+            declaredProperties = declaredProperties.sortedBy { it.propertyName },
             hasNoArgsConstructor = hasNoArgsConstructor,
-            persistedFields = persistedFields
+            persistedFields = persistedFields.sortedBy { it.propertyName }
         )
     }
 
@@ -248,6 +268,46 @@ private class LitePalSchemaKspProcessor(
         return constructors.any { constructor -> constructor.parameters.isEmpty() }
     }
 
+    private fun hasPublicAccessors(property: KSPropertyDeclaration, normalizedTypeName: String): Boolean {
+        if (!hasPublicGetter(property)) {
+            logger.error(
+                "Persistent property '${property.simpleName.asString()}' must expose a public getter. " +
+                    "Please declare it as public and provide getter/setter.",
+                property
+            )
+            hasCompilationError = true
+            return false
+        }
+        if (!hasPublicSetter(property)) {
+            logger.error(
+                "Persistent property '${property.simpleName.asString()}' must expose a public setter. " +
+                    "Please declare it as mutable public var with getter/setter.",
+                property
+            )
+            hasCompilationError = true
+            return false
+        }
+        if (normalizedTypeName.isBlank()) {
+            logger.error(
+                "Persistent property '${property.simpleName.asString()}' has unsupported type metadata.",
+                property
+            )
+            hasCompilationError = true
+            return false
+        }
+        return true
+    }
+
+    private fun hasPublicGetter(property: KSPropertyDeclaration): Boolean {
+        val getter = property.getter ?: return false
+        return getter.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.PUBLIC)
+    }
+
+    private fun hasPublicSetter(property: KSPropertyDeclaration): Boolean {
+        val setter = property.setter ?: return false
+        return setter.modifiers.contains(com.google.devtools.ksp.symbol.Modifier.PUBLIC)
+    }
+
     private fun readColumnConfig(property: KSPropertyDeclaration): ColumnConfig {
         val annotation = property.findAnnotation(COLUMN_FQN) ?: return ColumnConfig()
         return ColumnConfig(
@@ -281,6 +341,13 @@ private class LitePalSchemaKspProcessor(
 
     private fun normalizeTypeName(typeName: String): String {
         return when (typeName) {
+            "boolean" -> "java.lang.Boolean"
+            "float" -> "java.lang.Float"
+            "double" -> "java.lang.Double"
+            "int" -> "java.lang.Integer"
+            "long" -> "java.lang.Long"
+            "short" -> "java.lang.Short"
+            "char" -> "java.lang.Character"
             "kotlin.Boolean" -> "java.lang.Boolean"
             "kotlin.Float" -> "java.lang.Float"
             "kotlin.Double" -> "java.lang.Double"
@@ -354,9 +421,25 @@ private class LitePalSchemaKspProcessor(
 
     private fun isCollectionType(typeName: String): Boolean {
         return typeName == "kotlin.collections.List" ||
+            typeName == "kotlin.collections.MutableList" ||
             typeName == "kotlin.collections.Set" ||
+            typeName == "kotlin.collections.MutableSet" ||
             typeName == "java.util.List" ||
             typeName == "java.util.Set"
+    }
+
+    private fun resolveCollectionType(typeName: String): String? {
+        return when (typeName) {
+            "kotlin.collections.List",
+            "kotlin.collections.MutableList",
+            "java.util.List" -> "LIST"
+
+            "kotlin.collections.Set",
+            "kotlin.collections.MutableSet",
+            "java.util.Set" -> "SET"
+
+            else -> null
+        }
     }
 
     private fun KSPropertyDeclaration.isStatic(): Boolean {
