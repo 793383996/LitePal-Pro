@@ -11,6 +11,7 @@ data class EntityModel(
     val tableName: String,
     val supportedFields: List<String>,
     val supportedGenericFields: List<String>,
+    val hasNoArgsConstructor: Boolean,
     val persistedFields: List<PersistentFieldModel>
 )
 

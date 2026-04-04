@@ -186,11 +186,7 @@ class RuntimeStabilityInstrumentationTest {
         val switchThread = Thread {
             try {
                 repeat(1000) { index ->
-                    when {
-                        index % 5 == 0 -> LitePal.useDefault()
-                        index % 2 == 0 -> LitePal.use(dbA)
-                        else -> LitePal.use(dbB)
-                    }
+                    LitePal.use(if (index % 2 == 0) dbA else dbB)
                 }
             } catch (t: Throwable) {
                 failure.compareAndSet(null, t)

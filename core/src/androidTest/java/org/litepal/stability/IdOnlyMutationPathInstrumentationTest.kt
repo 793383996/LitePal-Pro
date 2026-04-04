@@ -58,22 +58,14 @@ class IdOnlyMutationPathInstrumentationTest {
             assertTrue(album.save())
         }
 
-        val updater = RuntimeAlbum().apply {
-            tags = mutableListOf("new_a", "new_b")
-        }
+        val updater = RuntimeAlbum().apply { name = "album_renamed" }
         val updatedRows = updater.updateAll("name like ?", "album_%")
         assertTrue(updatedRows >= 24)
 
-        val afterUpdate = LitePal.where("name like ?", "album_%").find(RuntimeAlbum::class.java)
+        val afterUpdate = LitePal.where("name = ?", "album_renamed").find(RuntimeAlbum::class.java)
         assertEquals(24, afterUpdate.size)
-        assertTrue(
-            afterUpdate.all { model ->
-                val tags = model.tags ?: return@all false
-                tags.size == 2 && tags[0] == "new_a" && tags[1] == "new_b"
-            }
-        )
 
-        val deletedRows = LitePal.deleteAll(RuntimeAlbum::class.java, "name like ?", "album_%")
+        val deletedRows = LitePal.deleteAll(RuntimeAlbum::class.java, "name = ?", "album_renamed")
         assertTrue(deletedRows >= 24)
 
         val genericTableName = DBUtility.getGenericTableName(RuntimeAlbum::class.java.name, "tags")

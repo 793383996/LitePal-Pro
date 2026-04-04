@@ -12,6 +12,7 @@ import javax.annotation.processing.SupportedSourceVersion
 import javax.lang.model.SourceVersion
 import javax.lang.model.element.AnnotationMirror
 import javax.lang.model.element.ElementKind
+import javax.lang.model.element.ExecutableElement
 import javax.lang.model.element.Modifier
 import javax.lang.model.element.TypeElement
 import javax.lang.model.element.VariableElement
@@ -116,6 +117,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
     private fun toEntityModel(typeElement: TypeElement): EntityModel {
         val className = typeElement.qualifiedName.toString()
         val tableName = typeElement.simpleName.toString()
+        val hasNoArgsConstructor = hasNoArgsConstructor(typeElement)
 
         val supportedFields = linkedSetOf<String>()
         val supportedGenericFields = linkedSetOf<String>()
@@ -143,7 +145,7 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
                 persistedFields.add(
                     PersistentFieldModel(
                         propertyName = fieldName,
-                        columnName = fieldName,
+                        columnName = resolveColumnName(fieldName),
                         typeName = normalizedTypeName,
                         columnType = mapToColumnType(normalizedTypeName),
                         nullable = columnConfig.nullable,
@@ -169,8 +171,27 @@ class LitePalSchemaKaptProcessor : AbstractProcessor() {
             tableName = tableName,
             supportedFields = supportedFields.toList(),
             supportedGenericFields = supportedGenericFields.toList(),
+            hasNoArgsConstructor = hasNoArgsConstructor,
             persistedFields = persistedFields
         )
+    }
+
+    private fun resolveColumnName(fieldName: String): String {
+        return if ("_id".equals(fieldName, ignoreCase = true) || "id".equals(fieldName, ignoreCase = true)) {
+            "id"
+        } else {
+            fieldName
+        }
+    }
+
+    private fun hasNoArgsConstructor(typeElement: TypeElement): Boolean {
+        val constructors = typeElement.enclosedElements
+            .filter { it.kind == ElementKind.CONSTRUCTOR }
+            .mapNotNull { it as? ExecutableElement }
+        if (constructors.isEmpty()) {
+            return true
+        }
+        return constructors.any { it.parameters.isEmpty() }
     }
 
     private fun readColumnConfig(field: VariableElement): ColumnConfig {

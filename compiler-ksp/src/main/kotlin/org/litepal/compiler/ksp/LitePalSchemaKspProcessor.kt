@@ -10,12 +10,14 @@ import com.google.devtools.ksp.processing.SymbolProcessorProvider
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSFunctionDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import org.litepal.compiler.common.AnchorModel
 import org.litepal.compiler.common.EntityModel
 import org.litepal.compiler.common.PersistentFieldModel
 import org.litepal.compiler.common.RegistryRendering
+import java.util.Locale
 
 class LitePalSchemaKspProcessorProvider : SymbolProcessorProvider {
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor {
@@ -124,15 +126,13 @@ private class LitePalSchemaKspProcessor(
     private fun toEntityModel(entityDecl: KSClassDeclaration): EntityModel {
         val className = entityDecl.qualifiedName?.asString().orEmpty()
         val tableName = entityDecl.simpleName.asString()
+        val hasNoArgsConstructor = hasNoArgsConstructor(entityDecl)
 
         val supportedFields = linkedSetOf<String>()
         val supportedGenericFields = linkedSetOf<String>()
         val persistedFields = ArrayList<PersistentFieldModel>()
 
-        entityDecl.getAllProperties().forEach { property ->
-            if (property.isStatic()) {
-                return@forEach
-            }
+        collectPersistedProperties(entityDecl).forEach { property ->
             val columnConfig = readColumnConfig(property)
             if (columnConfig.ignore) {
                 return@forEach
@@ -146,7 +146,7 @@ private class LitePalSchemaKspProcessor(
                 persistedFields.add(
                     PersistentFieldModel(
                         propertyName = propertyName,
-                        columnName = propertyName,
+                        columnName = resolveColumnName(propertyName),
                         typeName = normalizedTypeName,
                         columnType = mapToColumnType(normalizedTypeName),
                         nullable = columnConfig.nullable,
@@ -173,8 +173,79 @@ private class LitePalSchemaKspProcessor(
             tableName = tableName,
             supportedFields = supportedFields.toList(),
             supportedGenericFields = supportedGenericFields.toList(),
+            hasNoArgsConstructor = hasNoArgsConstructor,
             persistedFields = persistedFields
         )
+    }
+
+    private fun collectPersistedProperties(entityDecl: KSClassDeclaration): List<KSPropertyDeclaration> {
+        val allProperties = entityDecl.getAllProperties().toList()
+        val propertyNameSet = allProperties
+            .map { property -> property.simpleName.asString() }
+            .toSet()
+        val collected = LinkedHashMap<String, KSPropertyDeclaration>()
+        for (property in allProperties) {
+            val propertyName = property.simpleName.asString()
+            if (propertyName == "Companion" || propertyName.startsWith("$")) {
+                continue
+            }
+            if (property.isStatic()) {
+                continue
+            }
+            val ownerName = (property.parentDeclaration as? KSClassDeclaration)
+                ?.qualifiedName
+                ?.asString()
+                .orEmpty()
+            if (isLitePalSupportBoundary(ownerName)) {
+                continue
+            }
+            val resolvedType = normalizeTypeName(
+                property.type.resolve().declaration.qualifiedName?.asString().orEmpty()
+            )
+            if (isBooleanAliasProperty(propertyName, resolvedType, propertyNameSet)) {
+                continue
+            }
+            if (!collected.containsKey(propertyName)) {
+                collected[propertyName] = property
+            }
+        }
+        return collected.values.toList()
+    }
+
+    private fun isLitePalSupportBoundary(className: String): Boolean {
+        return className == LITEPAL_SUPPORT_FQN ||
+            className == "kotlin.Any" ||
+            className == "java.lang.Object"
+    }
+
+    private fun isBooleanAliasProperty(propertyName: String, normalizedTypeName: String, propertyNameSet: Set<String>): Boolean {
+        if (!propertyName.startsWith("is") || propertyName.length <= 2) {
+            return false
+        }
+        if (normalizedTypeName != "boolean" && normalizedTypeName != "java.lang.Boolean") {
+            return false
+        }
+        val aliasName = propertyName.substring(2, 3).lowercase(Locale.US) + propertyName.substring(3)
+        return aliasName in propertyNameSet
+    }
+
+    private fun resolveColumnName(propertyName: String): String {
+        return if ("_id".equals(propertyName, ignoreCase = true) || "id".equals(propertyName, ignoreCase = true)) {
+            "id"
+        } else {
+            propertyName
+        }
+    }
+
+    private fun hasNoArgsConstructor(entityDecl: KSClassDeclaration): Boolean {
+        val constructors = entityDecl.declarations
+            .filterIsInstance<KSFunctionDeclaration>()
+            .filter { declaration -> declaration.simpleName.asString() == "<init>" }
+            .toList()
+        if (constructors.isEmpty()) {
+            return true
+        }
+        return constructors.any { constructor -> constructor.parameters.isEmpty() }
     }
 
     private fun readColumnConfig(property: KSPropertyDeclaration): ColumnConfig {
@@ -289,7 +360,14 @@ private class LitePalSchemaKspProcessor(
     }
 
     private fun KSPropertyDeclaration.isStatic(): Boolean {
-        return this.extensionReceiver != null || this.isDelegated()
+        if (this.extensionReceiver != null || this.isDelegated()) {
+            return true
+        }
+        val parentDeclaration = this.parentDeclaration
+        if (parentDeclaration is KSClassDeclaration) {
+            return parentDeclaration.classKind.name == "OBJECT"
+        }
+        return false
     }
 
     private data class ColumnConfig(
@@ -302,6 +380,7 @@ private class LitePalSchemaKspProcessor(
 
     companion object {
         private const val SCHEMA_ANCHOR_FQN = "org.litepal.annotation.LitePalSchemaAnchor"
+        private const val LITEPAL_SUPPORT_FQN = "org.litepal.crud.LitePalSupport"
         private const val COLUMN_FQN = "org.litepal.annotation.Column"
         private const val ENCRYPT_FQN = "org.litepal.annotation.Encrypt"
     }

@@ -40,4 +40,24 @@ class GeneratedRegistryLocatorTest {
         }
         assertTrue(thrown is IllegalStateException)
     }
+
+    @Test
+    fun registryShouldFallbackToNullWhenAutoModeAndRegistryMissing() {
+        LitePalRuntime.setRuntimeOptions(
+            LitePalRuntimeOptions(generatedMetadataMode = GeneratedMetadataMode.AUTO)
+        )
+        System.setProperty("litepal.generated.registry", "org.litepal.generated.NotFoundRegistry")
+        GeneratedRegistryLocator.resetForTesting()
+
+        var thrown: Throwable? = null
+        var registry: LitePalGeneratedRegistry? = null
+        try {
+            registry = GeneratedRegistryLocator.registry()
+        } catch (t: Throwable) {
+            thrown = t
+        }
+
+        assertTrue("unexpected throwable=$thrown", thrown == null)
+        assertNull(registry)
+    }
 }

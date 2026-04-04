@@ -54,6 +54,7 @@ import java.util.concurrent.Future
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicLong
 
 object Operator {
@@ -80,8 +81,12 @@ object Operator {
     )
 
     private sealed class DatabaseLifecycleEvent {
-        data object Created : DatabaseLifecycleEvent()
-        data class Upgraded(val oldVersion: Int, val newVersion: Int) : DatabaseLifecycleEvent()
+        data class Created(val listenerRegistrationId: Long) : DatabaseLifecycleEvent()
+        data class Upgraded(
+            val oldVersion: Int,
+            val newVersion: Int,
+            val listenerRegistrationId: Long
+        ) : DatabaseLifecycleEvent()
     }
 
     private data class ListenerRegistration(
@@ -94,7 +99,9 @@ object Operator {
             val lifecycleOwner = owner ?: return
             val observer = ownerObserver ?: return
             try {
-                lifecycleOwner.lifecycle.removeObserver(observer)
+                Operator.runLifecycleActionOnMainThread("removeDatabaseListenerObserver") {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                }
             } catch (t: Throwable) {
                 LitePalLog.w(TAG, "Failed to detach lifecycle observer from database listener: ${t.message}")
             }
@@ -294,12 +301,16 @@ object Operator {
 
     @JvmStatic
     fun notifyDatabaseCreated() {
-        pendingDatabaseEvents.offer(DatabaseLifecycleEvent.Created)
+        val registrationId = currentListenerRegistrationId() ?: return
+        pendingDatabaseEvents.offer(DatabaseLifecycleEvent.Created(registrationId))
     }
 
     @JvmStatic
     fun notifyDatabaseUpgraded(oldVersion: Int, newVersion: Int) {
-        pendingDatabaseEvents.offer(DatabaseLifecycleEvent.Upgraded(oldVersion, newVersion))
+        val registrationId = currentListenerRegistrationId() ?: return
+        pendingDatabaseEvents.offer(
+            DatabaseLifecycleEvent.Upgraded(oldVersion, newVersion, registrationId)
+        )
     }
 
     @JvmStatic
@@ -420,18 +431,16 @@ object Operator {
         }
         while (true) {
             val event = pendingDatabaseEvents.poll() ?: break
-            val registrationSnapshot = listenerRegistration ?: continue
-            val expectedRegistrationId = registrationSnapshot.id
             when (event) {
                 is DatabaseLifecycleEvent.Created -> {
                     dispatchMainThreadListener("onCreate") {
-                        dispatchDatabaseEventIfCurrent(expectedRegistrationId, event)
+                        dispatchDatabaseEventIfCurrent(event.listenerRegistrationId, event)
                     }
                 }
 
                 is DatabaseLifecycleEvent.Upgraded -> {
                     dispatchMainThreadListener("onUpgrade") {
-                        dispatchDatabaseEventIfCurrent(expectedRegistrationId, event)
+                        dispatchDatabaseEventIfCurrent(event.listenerRegistrationId, event)
                     }
                 }
             }
@@ -842,8 +851,10 @@ object Operator {
             listenerRegistration = registration
         }
         previous?.detachObserver()
-        owner.lifecycle.addObserver(observer)
-        if (owner.lifecycle.currentState == Lifecycle.State.DESTROYED) {
+        runLifecycleActionOnMainThread("registerDatabaseListenerObserver") {
+            owner.lifecycle.addObserver(observer)
+        }
+        if (readLifecycleState(owner) == Lifecycle.State.DESTROYED) {
             unregisterDatabaseListenerInternal(nextId, clearPendingEvents = true)
         }
     }
@@ -871,6 +882,50 @@ object Operator {
 
     @JvmStatic
     fun getDBListener(): DatabaseListener? = listenerRegistration?.listener
+
+    private fun currentListenerRegistrationId(): Long? = listenerRegistration?.id
+
+    private fun readLifecycleState(owner: LifecycleOwner): Lifecycle.State {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return owner.lifecycle.currentState
+        }
+        val stateRef = AtomicReference(Lifecycle.State.INITIALIZED)
+        runLifecycleActionOnMainThread("readLifecycleState") {
+            stateRef.set(owner.lifecycle.currentState)
+        }
+        return stateRef.get()
+    }
+
+    private fun runLifecycleActionOnMainThread(operation: String, action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action()
+            return
+        }
+        val latch = CountDownLatch(1)
+        val errorRef = AtomicReference<Throwable?>()
+        handler.post {
+            try {
+                action()
+            } catch (t: Throwable) {
+                errorRef.set(t)
+            } finally {
+                latch.countDown()
+            }
+        }
+        val completed = try {
+            latch.await(10, TimeUnit.SECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            LitePalLog.e(TAG, "Interrupted while waiting for main-thread lifecycle operation=$operation.", e)
+            false
+        }
+        if (!completed) {
+            LitePalLog.w(TAG, "Lifecycle operation=$operation timed out while waiting on main thread.")
+            return
+        }
+        val error = errorRef.get() ?: return
+        throw error
+    }
 
     @JvmStatic
     internal fun validateSchemaIfNeeded(database: SQLiteDatabase, epoch: Long) {

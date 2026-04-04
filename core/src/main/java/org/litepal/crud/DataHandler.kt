@@ -78,7 +78,7 @@ abstract class DataHandler : LitePalBase() {
                 limit
             )
             if (cursor.moveToFirst()) {
-                val isEagerQuery = !foreignKeyAssociations.isNullOrEmpty()
+                val hasCurrentModelForeignKeys = !foreignKeyAssociations.isNullOrEmpty()
                 val queryInfoCacheSparseArray = SparseArray<QueryInfoCache>()
                 @Suppress("UNCHECKED_CAST")
                 val generatedCursorMapper = GeneratedRegistryLocator
@@ -107,7 +107,7 @@ abstract class DataHandler : LitePalBase() {
                             queryInfoCacheSparseArray
                         )
                     }
-                    if (isEagerQuery) {
+                    if (hasCurrentModelForeignKeys) {
                         collectEagerForeignKeyIds(
                             baseObjId,
                             cursor,
@@ -120,13 +120,17 @@ abstract class DataHandler : LitePalBase() {
                     dataList.add(modelInstance)
                 } while (cursor.moveToNext())
                 queryInfoCacheSparseArray.clear()
-                if (isEagerQuery && baseObjs.isNotEmpty()) {
-                    attachCurrentModelForeignKeyAssociations(
-                        baseObjs,
-                        foreignKeyAssociations,
-                        eagerForeignKeyIdMapByBaseObj
-                    )
-                    setAssociatedModelsBatch(baseObjs)
+                if (baseObjs.isNotEmpty()) {
+                    if (hasCurrentModelForeignKeys) {
+                        attachCurrentModelForeignKeyAssociations(
+                            baseObjs,
+                            foreignKeyAssociations.orEmpty(),
+                            eagerForeignKeyIdMapByBaseObj
+                        )
+                    }
+                    if (!fkInOtherModel.isNullOrEmpty()) {
+                        setAssociatedModelsBatch(baseObjs)
+                    }
                 }
                 setGenericValuesToModelsBatch(baseObjs, supportedGenericFields)
             }
@@ -186,17 +190,24 @@ abstract class DataHandler : LitePalBase() {
             .findEntityMeta(baseObj.getClassName())
             ?.fieldBinder as? org.litepal.generated.FieldBinder<LitePalSupport>
         if (generatedBinder != null) {
-            LitePalRuntime.recordGeneratedPathHit("write.fieldBinder")
-            if (isUpdating()) {
-                generatedBinder.bindForUpdate(baseObj) { column, value ->
-                    putGeneratedContentValue(values, column, value)
-                }
-            } else if (isSaving()) {
+            if (isSaving()) {
+                LitePalRuntime.recordGeneratedPathHit("write.fieldBinder.save")
                 generatedBinder.bindForSave(baseObj) { column, value ->
                     putGeneratedContentValue(values, column, value)
                 }
+                return
             }
-            return
+            if (isUpdating()) {
+                // Keep update semantics compatible with legacy reflection path:
+                // skip fields holding constructor defaults unless explicitly setToDefault().
+                LitePalRuntime.recordReflectionFallback("write.fieldBinder.update.compat")
+                for (field in supportedFields) {
+                    if (!isIdColumn(field.name)) {
+                        putFieldsValueDependsOnSaveOrUpdate(baseObj, field, values)
+                    }
+                }
+                return
+            }
         }
         LitePalRuntime.recordReflectionFallback("write.putFieldsValue")
         for (field in supportedFields) {

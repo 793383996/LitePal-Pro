@@ -149,6 +149,52 @@ class SchemaValidationGateTest {
         assertTrue("markerCount=$markerCount", markerCount == 1)
     }
 
+    @Test
+    fun validate_shouldUpdateExistingHashMarkerWhenRegistryChanges() {
+        val db = SQLiteDatabase.create(null)
+        db.execSQL("create table if not exists User (id integer primary key autoincrement, name text, age integer not null)")
+        db.execSQL(
+            "create table if not exists litepal_master (" +
+                "id integer primary key autoincrement, " +
+                "anchor text not null unique, " +
+                "schema_version integer not null, " +
+                "schema_hash text not null, " +
+                "updated_at integer not null)"
+        )
+        db.execSQL(
+            "insert into litepal_master(anchor, schema_version, schema_hash, updated_at) values(?, ?, ?, ?)",
+            arrayOf<Any>("test.Anchor", 0, "old-hash", System.currentTimeMillis())
+        )
+
+        System.setProperty("litepal.generated.registry", StrictValidationRegistry::class.java.name)
+        GeneratedRegistryLocator.resetForTesting()
+        LitePalRuntime.setErrorPolicy(LitePalErrorPolicy.STRICT)
+
+        var thrown: Throwable? = null
+        var storedVersion = -1
+        var storedHash = ""
+        try {
+            SchemaValidationGate.validate(db)
+            db.rawQuery(
+                "select schema_version, schema_hash from litepal_master where anchor = ?",
+                arrayOf("test.Anchor")
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    storedVersion = cursor.getInt(0)
+                    storedHash = cursor.getString(1).orEmpty()
+                }
+            }
+        } catch (t: Throwable) {
+            thrown = t
+        } finally {
+            db.close()
+        }
+
+        assertTrue("unexpected throwable=$thrown", thrown == null)
+        assertTrue("storedVersion=$storedVersion", storedVersion == 1)
+        assertTrue("storedHash=$storedHash", storedHash == "test-hash")
+    }
+
     class StrictValidationRegistry : LitePalGeneratedRegistry {
         override val schemaVersion: Int = 1
         override val schemaJson: String = "{}"

@@ -16,6 +16,7 @@ class RegistryRenderingTest {
                     tableName = "User",
                     supportedFields = listOf("name", "age"),
                     supportedGenericFields = listOf("tags"),
+                    hasNoArgsConstructor = true,
                     persistedFields = listOf(
                         PersistentFieldModel(
                             propertyName = "name",
@@ -66,6 +67,7 @@ class RegistryRenderingTest {
                     tableName = "Empty",
                     supportedFields = emptyList(),
                     supportedGenericFields = emptyList(),
+                    hasNoArgsConstructor = true,
                     persistedFields = emptyList()
                 )
             )

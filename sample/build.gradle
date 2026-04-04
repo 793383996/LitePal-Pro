@@ -8,6 +8,10 @@ android {
     namespace 'org.litepal.litepalsample'
     compileSdk 36
 
+    adbOptions {
+        installOptions += ['-r', '-d']
+    }
+
     defaultConfig {
         applicationId "org.litepal.litepalsample"
         minSdk 24

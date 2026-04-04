@@ -65,7 +65,11 @@ object RegistryRendering {
                 )
                 """.trimIndent()
             }
-            val entityFactoryRef = "LitePalGeneratedEntityFactory$index"
+            val entityFactoryRef = if (entity.hasNoArgsConstructor) {
+                "LitePalGeneratedEntityFactory$index"
+            } else {
+                "null"
+            }
             val associationMetaRef = "LitePalGeneratedAssociationMeta$index"
             val binderRef = if (entity.persistedFields.isEmpty()) "null" else "LitePalGeneratedFieldBinder$index"
             val mapperRef = if (entity.persistedFields.isEmpty()) "null" else "LitePalGeneratedCursorMapper$index"
@@ -102,6 +106,12 @@ object RegistryRendering {
             private object LitePalGeneratedSkipValue
 
             private fun litePalResolveField(className: String, fieldName: String): Field {
+                val fallbackFieldName = if (fieldName.startsWith("is") && fieldName.length > 2) {
+                    val initial = fieldName.substring(2, 3).lowercase()
+                    initial + fieldName.substring(3)
+                } else {
+                    null
+                }
                 var current: Class<*>? = Class.forName(className)
                 while (current != null && current != Any::class.java) {
                     try {
@@ -109,6 +119,15 @@ object RegistryRendering {
                         field.isAccessible = true
                         return field
                     } catch (_: NoSuchFieldException) {
+                        if (!fallbackFieldName.isNullOrBlank()) {
+                            try {
+                                val fallbackField = current.getDeclaredField(fallbackFieldName)
+                                fallbackField.isAccessible = true
+                                return fallbackField
+                            } catch (_: NoSuchFieldException) {
+                                // ignore and continue to parent class
+                            }
+                        }
                         current = current.superclass
                     }
                 }
@@ -116,7 +135,12 @@ object RegistryRendering {
             }
 
             private fun litePalResolveColumnName(rawName: String): String {
-                return BaseUtility.changeCase(DBUtility.convertToValidColumnName(rawName)).orEmpty()
+                val normalized = if ("_id".equals(rawName, ignoreCase = true) || "id".equals(rawName, ignoreCase = true)) {
+                    "id"
+                } else {
+                    rawName
+                }
+                return BaseUtility.changeCase(DBUtility.convertToValidColumnName(normalized)).orEmpty()
             }
 
             private fun litePalIsDate(typeName: String): Boolean {
@@ -287,10 +311,12 @@ object RegistryRendering {
         val entityFactoryName = "LitePalGeneratedEntityFactory$index"
         val associationMetaName = "LitePalGeneratedAssociationMeta$index"
         val builder = StringBuilder().apply {
-            appendLine("private object $entityFactoryName : EntityFactory<LitePalSupport> {")
-            appendLine("    override fun newInstance(): LitePalSupport = ${entity.className}()")
-            appendLine("}")
-            appendLine()
+            if (entity.hasNoArgsConstructor) {
+                appendLine("private object $entityFactoryName : EntityFactory<LitePalSupport> {")
+                appendLine("    override fun newInstance(): LitePalSupport = ${entity.className}()")
+                appendLine("}")
+                appendLine()
+            }
             appendLine("private object $associationMetaName : AssociationMeta {")
             appendLine("    override val description: String = ${toKotlinString("generated:${entity.className}")}")
             appendLine("}")
@@ -304,30 +330,38 @@ object RegistryRendering {
             "private val field$fieldIndex: Field = litePalResolveField(${toKotlinString(entity.className)}, ${toKotlinString(field.propertyName)})"
         }.joinToString("\n    ")
 
-        val saveBlocks = entity.persistedFields.mapIndexed { fieldIndex, field ->
+        val writableFieldEntries = entity.persistedFields.mapIndexedNotNull { fieldIndex, field ->
+            if (isIdLikeName(field.columnName) || isIdLikeName(field.propertyName)) {
+                null
+            } else {
+                fieldIndex to field
+            }
+        }
+
+        val saveBlocks = writableFieldEntries.mapIndexed { writeIndex, (fieldIndex, field) ->
             """
-            val saveValue$fieldIndex = litePalValueForSave(
+            val saveValue$writeIndex = litePalValueForSave(
                 rawValue = field$fieldIndex.get(model),
                 typeName = ${toKotlinString(field.typeName)},
                 defaultValue = ${toKotlinString(field.defaultValue)},
                 encryptAlgorithm = ${field.encryptAlgorithm?.let { toKotlinString(it) } ?: "null"}
             )
-            if (saveValue$fieldIndex !== LitePalGeneratedSkipValue) {
-                put(${toKotlinString(field.columnName)}, saveValue$fieldIndex)
+            if (saveValue$writeIndex !== LitePalGeneratedSkipValue) {
+                put(${toKotlinString(field.columnName)}, saveValue$writeIndex)
             }
             """.trimIndent()
-        }.joinToString("\n\n        ")
+        }.joinToString("\n\n        ").ifBlank { "/* no writable non-id fields */" }
 
-        val updateBlocks = entity.persistedFields.mapIndexed { fieldIndex, field ->
+        val updateBlocks = writableFieldEntries.mapIndexed { writeIndex, (fieldIndex, field) ->
             """
-            val updateValue$fieldIndex = litePalValueForUpdate(
+            val updateValue$writeIndex = litePalValueForUpdate(
                 rawValue = field$fieldIndex.get(model),
                 typeName = ${toKotlinString(field.typeName)},
                 encryptAlgorithm = ${field.encryptAlgorithm?.let { toKotlinString(it) } ?: "null"}
             )
-            put(${toKotlinString(field.columnName)}, updateValue$fieldIndex)
+            put(${toKotlinString(field.columnName)}, updateValue$writeIndex)
             """.trimIndent()
-        }.joinToString("\n\n        ")
+        }.joinToString("\n\n        ").ifBlank { "/* no writable non-id fields */" }
 
         val mapperColumnDecls = entity.persistedFields.mapIndexed { fieldIndex, field ->
             "private val column$fieldIndex: String = litePalResolveColumnName(${toKotlinString(field.columnName)})"
@@ -383,6 +417,10 @@ object RegistryRendering {
 
     private fun quoted(values: List<String>): String {
         return values.joinToString(",") { toKotlinString(it) }
+    }
+
+    private fun isIdLikeName(name: String): Boolean {
+        return "_id".equals(name, ignoreCase = true) || "id".equals(name, ignoreCase = true)
     }
 
     private fun escapeJson(value: String): String {
