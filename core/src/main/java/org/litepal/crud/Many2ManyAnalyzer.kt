@@ -22,7 +22,6 @@ import org.litepal.tablemanager.Connector
 import org.litepal.util.BaseUtility
 import org.litepal.util.DBUtility
 import org.litepal.util.LitePalLog
-import java.lang.reflect.InvocationTargetException
 
 class Many2ManyAnalyzer : AssociationsAnalyzer() {
 
@@ -30,19 +29,20 @@ class Many2ManyAnalyzer : AssociationsAnalyzer() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun analyze(baseObj: LitePalSupport, associationInfo: AssociationsInfo) {
         val associatedModels = getAssociatedModels(baseObj, associationInfo)
         declareAssociations(baseObj, associationInfo)
         if (associatedModels != null) {
             for (associatedModel in associatedModels) {
-                val reverseField = associationInfo.getAssociateSelfFromOtherModel() ?: continue
+                if (associationInfo.getAssociateSelfFromOtherModel().isNullOrBlank()) {
+                    continue
+                }
                 val tempCollection = getReverseAssociatedModels(associatedModel, associationInfo)
                 val reverseAssociatedModels = checkAssociatedModelCollection(
                     tempCollection,
-                    reverseField
+                    associationInfo.getAssociateSelfCollectionType()
                 )
                 addNewModelForAssociatedModel(reverseAssociatedModels, baseObj)
                 setReverseAssociatedModels(associatedModel, associationInfo, reverseAssociatedModels)

@@ -18,7 +18,6 @@ package org.litepal.crud
 
 import org.litepal.crud.model.AssociationsInfo
 import org.litepal.util.DBUtility
-import java.lang.reflect.InvocationTargetException
 
 class One2OneAnalyzer : AssociationsAnalyzer() {
 
@@ -26,8 +25,7 @@ class One2OneAnalyzer : AssociationsAnalyzer() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun analyze(baseObj: LitePalSupport, associationInfo: AssociationsInfo) {
         val associatedModel = getAssociatedModel(baseObj, associationInfo)

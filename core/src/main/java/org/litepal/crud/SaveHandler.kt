@@ -18,13 +18,14 @@ package org.litepal.crud
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
-import org.litepal.annotation.Encrypt
 import org.litepal.crud.model.AssociationsInfo
 import org.litepal.exceptions.LitePalSupportException
+import org.litepal.generated.GeneratedFieldMeta
+import org.litepal.generated.GeneratedGenericFieldMeta
+import org.litepal.generated.GeneratedRegistryLocator
+import org.litepal.generated.IdAccessor
 import org.litepal.util.DBUtility
 import org.litepal.util.LitePalLog
-import java.lang.reflect.Field
-import java.lang.reflect.InvocationTargetException
 
 class SaveHandler(db: SQLiteDatabase) : DataHandler() {
 
@@ -38,8 +39,7 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun onSave(baseObj: LitePalSupport) {
         val className = baseObj.getClassName()
@@ -60,8 +60,7 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun <T : LitePalSupport> onSaveAll(collection: Collection<T>?) {
         if (!collection.isNullOrEmpty()) {
@@ -88,30 +87,28 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     private fun doSaveAction(
         baseObj: LitePalSupport,
-        supportedFields: List<Field>,
-        supportedGenericFields: List<Field>
+        supportedFields: List<GeneratedFieldMeta>,
+        supportedGenericFields: List<GeneratedGenericFieldMeta>
     ) {
         values.clear()
         beforeSave(baseObj, supportedFields, values)
         val id = saving(baseObj, values)
-        afterSave(baseObj, supportedFields, supportedGenericFields, id)
+        afterSave(baseObj, supportedGenericFields, id)
     }
 
     @Throws(
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     private fun beforeSave(
         baseObj: LitePalSupport,
-        supportedFields: List<Field>,
+        supportedFields: List<GeneratedFieldMeta>,
         values: ContentValues
     ) {
         putFieldsValue(baseObj, supportedFields, values)
@@ -125,15 +122,14 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         return mDatabase.insert(baseObj.getTableName(), null, values)
     }
 
-    @Throws(IllegalAccessException::class, InvocationTargetException::class)
+    @Throws(IllegalAccessException::class)
     private fun afterSave(
         baseObj: LitePalSupport,
-        supportedFields: List<Field>,
-        supportedGenericFields: List<Field>,
+        supportedGenericFields: List<GeneratedGenericFieldMeta>,
         id: Long
     ) {
         throwIfSaveFailed(id)
-        assignIdValue(baseObj, getIdField(supportedFields), id)
+        assignIdValue(baseObj, id)
         updateGenericTables(baseObj, supportedGenericFields, id)
         updateAssociatedTableWithFK(baseObj)
         insertIntermediateJoinTableValue(baseObj, false)
@@ -143,13 +139,12 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     private fun doUpdateAction(
         baseObj: LitePalSupport,
-        supportedFields: List<Field>,
-        supportedGenericFields: List<Field>
+        supportedFields: List<GeneratedFieldMeta>,
+        supportedGenericFields: List<GeneratedGenericFieldMeta>
     ) {
         values.clear()
         beforeUpdate(baseObj, supportedFields, values)
@@ -161,12 +156,11 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     private fun beforeUpdate(
         baseObj: LitePalSupport,
-        supportedFields: List<Field>,
+        supportedFields: List<GeneratedFieldMeta>,
         values: ContentValues
     ) {
         putFieldsValue(baseObj, supportedFields, values)
@@ -187,21 +181,12 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         }
     }
 
-    @Throws(InvocationTargetException::class, IllegalAccessException::class)
-    private fun afterUpdate(baseObj: LitePalSupport, supportedGenericFields: List<Field>) {
+    @Throws(IllegalAccessException::class)
+    private fun afterUpdate(baseObj: LitePalSupport, supportedGenericFields: List<GeneratedGenericFieldMeta>) {
         updateGenericTables(baseObj, supportedGenericFields, baseObj.getBaseObjId())
         updateAssociatedTableWithFK(baseObj)
         insertIntermediateJoinTableValue(baseObj, true)
         clearFKValueInAssociatedTable(baseObj)
-    }
-
-    private fun getIdField(supportedFields: List<Field>): Field? {
-        for (field in supportedFields) {
-            if (isIdColumn(field.name)) {
-                return field
-            }
-        }
-        return null
     }
 
     private fun throwIfSaveFailed(id: Long) {
@@ -210,26 +195,18 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         }
     }
 
-    private fun assignIdValue(baseObj: LitePalSupport, idField: Field?, id: Long) {
+    @Suppress("UNCHECKED_CAST")
+    private fun assignIdValue(baseObj: LitePalSupport, id: Long) {
         try {
             giveBaseObjIdValue(baseObj, id)
-            if (idField != null) {
-                giveModelIdValue(baseObj, idField.name, idField.type, id)
+            val idAccessor = GeneratedRegistryLocator
+                .findEntityMeta(baseObj.getClassName())
+                ?.idAccessor as? IdAccessor<LitePalSupport>
+            if (idAccessor != null) {
+                idAccessor.setId(baseObj, id)
             }
         } catch (e: Exception) {
             throw LitePalSupportException(e.message, e)
-        }
-    }
-
-    @Throws(SecurityException::class, IllegalArgumentException::class, IllegalAccessException::class)
-    private fun giveModelIdValue(baseObj: LitePalSupport, idName: String?, idType: Class<*>, id: Long) {
-        if (shouldGiveModelIdValue(idName, idType, id)) {
-            val value: Any = when (idType) {
-                Int::class.javaPrimitiveType, Int::class.javaObjectType -> id.toInt()
-                Long::class.javaPrimitiveType, Long::class.javaObjectType -> id
-                else -> throw LitePalSupportException(LitePalSupportException.ID_TYPE_INVALID_EXCEPTION)
-            }
-            DynamicExecutor.setField(baseObj, idName!!, value, baseObj.javaClass)
         }
     }
 
@@ -298,10 +275,6 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
             .toString()
     }
 
-    private fun shouldGiveModelIdValue(idName: String?, idType: Class<*>?, id: Long): Boolean {
-        return idName != null && idType != null && id > 0
-    }
-
     private fun updateByIds(
         tableName: String,
         values: ContentValues,
@@ -328,27 +301,25 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
         return rows
     }
 
-    @Throws(IllegalAccessException::class, InvocationTargetException::class)
+    @Throws(IllegalAccessException::class)
     private fun updateGenericTables(
         baseObj: LitePalSupport,
-        supportedGenericFields: List<Field>,
+        supportedGenericFields: List<GeneratedGenericFieldMeta>,
         id: Long
     ) {
         for (field in supportedGenericFields) {
-            val annotation = field.getAnnotation(Encrypt::class.java)
             var algorithm: String? = null
-            val genericTypeName = getGenericTypeName(field)
-            if (annotation != null && "java.lang.String" == genericTypeName) {
-                algorithm = annotation.algorithm
+            val genericTypeName = field.elementTypeName
+            if (!field.encryptAlgorithm.isNullOrBlank() && "java.lang.String" == genericTypeName) {
+                algorithm = field.encryptAlgorithm
             }
-            field.isAccessible = true
-            val collection = field[baseObj] as? Collection<*>
+            val collection = getFieldValue(baseObj, field.propertyName) as? Collection<*>
             if (collection != null) {
                 LitePalLog.d(
                     TAG,
-                    "updateGenericTables: class name is ${baseObj.getClassName()} , field name is ${field.name}"
+                    "updateGenericTables: class name is ${baseObj.getClassName()} , field name is ${field.propertyName}"
                 )
-                val tableName = DBUtility.getGenericTableName(baseObj.getClassName(), field.name)
+                val tableName = DBUtility.getGenericTableName(baseObj.getClassName(), field.propertyName)
                 val genericValueIdColumnName = DBUtility.getGenericValueIdColumnName(baseObj.getClassName())
                 mDatabase.delete(tableName.orEmpty(), "$genericValueIdColumnName = ?", arrayOf(id.toString()))
                 for (item in collection) {
@@ -359,14 +330,12 @@ class SaveHandler(db: SQLiteDatabase) : DataHandler() {
                         val dataSupport = objectValue as? LitePalSupport ?: continue
                         val baseObjId = dataSupport.getBaseObjId()
                         if (baseObjId <= 0) continue
-                        values.put(DBUtility.getM2MSelfRefColumnName(field), baseObjId)
+                        values.put(DBUtility.getM2MSelfRefColumnName(field.propertyName), baseObjId)
                     } else {
-                        val parameters = arrayOf(
-                            org.litepal.util.BaseUtility.changeCase(DBUtility.convertToValidColumnName(field.name)),
-                            objectValue
-                        )
-                        val parameterTypes = arrayOf<Class<*>>(String::class.java, getGenericTypeClass(field)!!)
-                        DynamicExecutor.send(values, "put", parameters, values.javaClass, parameterTypes)
+                        val genericColumnName = org.litepal.util.BaseUtility.changeCase(
+                            DBUtility.convertToValidColumnName(field.propertyName)
+                        ).orEmpty()
+                        putGeneratedContentValue(values, genericColumnName, objectValue)
                     }
                     mDatabase.insert(tableName.orEmpty(), null, values)
                 }

@@ -18,7 +18,6 @@ package org.litepal.crud
 
 import org.litepal.crud.model.AssociationsInfo
 import org.litepal.util.DBUtility
-import java.lang.reflect.InvocationTargetException
 
 internal class Many2OneAnalyzer : AssociationsAnalyzer() {
 
@@ -26,8 +25,7 @@ internal class Many2OneAnalyzer : AssociationsAnalyzer() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun analyze(baseObj: LitePalSupport, associationInfo: AssociationsInfo) {
         if (baseObj.getClassName() == associationInfo.getClassHoldsForeignKey()) {
@@ -41,17 +39,18 @@ internal class Many2OneAnalyzer : AssociationsAnalyzer() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     private fun analyzeManySide(baseObj: LitePalSupport, associationInfo: AssociationsInfo) {
         val associatedModel = getAssociatedModel(baseObj, associationInfo)
         if (associatedModel != null) {
-            val reverseField = associationInfo.getAssociateSelfFromOtherModel() ?: return
+            if (associationInfo.getAssociateSelfFromOtherModel().isNullOrBlank()) {
+                return
+            }
             val tempCollection = getReverseAssociatedModels(associatedModel, associationInfo)
             val reverseAssociatedModels = checkAssociatedModelCollection(
                 tempCollection,
-                reverseField
+                associationInfo.getAssociateSelfCollectionType()
             )
             setReverseAssociatedModels(associatedModel, associationInfo, reverseAssociatedModels)
             dealAssociatedModelOnManySide(reverseAssociatedModels, baseObj, associatedModel)
@@ -64,8 +63,7 @@ internal class Many2OneAnalyzer : AssociationsAnalyzer() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     private fun analyzeOneSide(baseObj: LitePalSupport, associationInfo: AssociationsInfo) {
         val associatedModels = getAssociatedModels(baseObj, associationInfo)

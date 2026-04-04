@@ -31,9 +31,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Release assemble and publication validation
+      - name: Release parity, tests, assemble and publication validation
         run: |
           ./gradlew \
+            :compiler-common:test \
+            :core:testDebugUnitTest \
+            verifyKspKaptGeneratedParity \
             :core:verifyReleasePublishCredentials \
             :core:assembleRelease \
             :core:generatePomFileForReleasePublication \

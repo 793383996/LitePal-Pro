@@ -63,7 +63,8 @@ class FluentQuery internal constructor() {
 
 
     fun <T> find(modelClass: Class<T>, isEager: Boolean): List<T> {
-        DatabaseRuntimeLock.withReadLock {
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
             val queryHandler = QueryHandler(Connector.getDatabase())
             val limit = if (mOffset == null) {
                 mLimit
@@ -73,7 +74,8 @@ class FluentQuery internal constructor() {
                 }
                 "${mOffset},${mLimit}"
             }
-            return queryHandler.onFind(modelClass, mColumns, mConditions, mOrderBy, limit, isEager)
+            queryHandler.onFind(modelClass, mColumns, mConditions, mOrderBy, limit, isEager)
+            }
         }
     }
 
@@ -84,7 +86,8 @@ class FluentQuery internal constructor() {
 
 
     fun <T> findFirst(modelClass: Class<T>, isEager: Boolean): T? {
-        DatabaseRuntimeLock.withReadLock {
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
             val limitTemp = mLimit
             if ("0" != mLimit) {
                 mLimit = "1"
@@ -95,9 +98,11 @@ class FluentQuery internal constructor() {
                 if (list.size != 1) {
                     throw LitePalSupportException("Found multiple records while only one record should be found at most.")
                 }
-                return list[0]
+                list[0]
+            } else {
+                null
             }
-            return null
+            }
         }
     }
 
@@ -108,7 +113,8 @@ class FluentQuery internal constructor() {
 
 
     fun <T> findLast(modelClass: Class<T>, isEager: Boolean): T? {
-        DatabaseRuntimeLock.withReadLock {
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
             val orderByTemp = mOrderBy
             val limitTemp = mLimit
             if (TextUtils.isEmpty(mOffset) && TextUtils.isEmpty(mLimit)) {
@@ -130,9 +136,11 @@ class FluentQuery internal constructor() {
             mLimit = limitTemp
             val size = list.size
             if (size > 0) {
-                return list[size - 1]
+                list[size - 1]
+            } else {
+                null
             }
-            return null
+            }
         }
     }
 
@@ -143,9 +151,11 @@ class FluentQuery internal constructor() {
 
 
     fun count(tableName: String?): Int {
-        DatabaseRuntimeLock.withReadLock {
-            val queryHandler = QueryHandler(Connector.getDatabase())
-            return queryHandler.onCount(tableName, mConditions)
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val queryHandler = QueryHandler(Connector.getDatabase())
+                queryHandler.onCount(tableName, mConditions)
+            }
         }
     }
 
@@ -156,9 +166,11 @@ class FluentQuery internal constructor() {
 
 
     fun average(tableName: String?, column: String): Double {
-        DatabaseRuntimeLock.withReadLock {
-            val queryHandler = QueryHandler(Connector.getDatabase())
-            return queryHandler.onAverage(tableName, column, mConditions)
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val queryHandler = QueryHandler(Connector.getDatabase())
+                queryHandler.onAverage(tableName, column, mConditions)
+            }
         }
     }
 
@@ -169,9 +181,11 @@ class FluentQuery internal constructor() {
 
 
     fun <T> max(tableName: String?, columnName: String, columnType: Class<T>): T {
-        DatabaseRuntimeLock.withReadLock {
-            val queryHandler = QueryHandler(Connector.getDatabase())
-            return queryHandler.onMax(tableName, columnName, mConditions, columnType)
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val queryHandler = QueryHandler(Connector.getDatabase())
+                queryHandler.onMax(tableName, columnName, mConditions, columnType)
+            }
         }
     }
 
@@ -182,9 +196,11 @@ class FluentQuery internal constructor() {
 
 
     fun <T> min(tableName: String?, columnName: String, columnType: Class<T>): T {
-        DatabaseRuntimeLock.withReadLock {
-            val queryHandler = QueryHandler(Connector.getDatabase())
-            return queryHandler.onMin(tableName, columnName, mConditions, columnType)
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val queryHandler = QueryHandler(Connector.getDatabase())
+                queryHandler.onMin(tableName, columnName, mConditions, columnType)
+            }
         }
     }
 
@@ -195,9 +211,11 @@ class FluentQuery internal constructor() {
 
 
     fun <T> sum(tableName: String?, columnName: String, columnType: Class<T>): T {
-        DatabaseRuntimeLock.withReadLock {
-            val queryHandler = QueryHandler(Connector.getDatabase())
-            return queryHandler.onSum(tableName, columnName, mConditions, columnType)
+        return Operator.runOnQueryExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val queryHandler = QueryHandler(Connector.getDatabase())
+                queryHandler.onSum(tableName, columnName, mConditions, columnType)
+            }
         }
     }
 

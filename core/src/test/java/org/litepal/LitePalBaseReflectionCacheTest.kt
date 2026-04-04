@@ -1,14 +1,32 @@
 package org.litepal
 
+import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.litepal.crud.LitePalSupport
+import org.litepal.generated.EntityMeta
+import org.litepal.generated.GeneratedEntityMeta
+import org.litepal.generated.GeneratedRegistryLocator
+import org.litepal.generated.LitePalGeneratedRegistry
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class LitePalBaseReflectionCacheTest {
+
+    @Before
+    fun setUp() {
+        System.setProperty("litepal.generated.registry", TestGeneratedRegistry::class.java.name)
+        GeneratedRegistryLocator.resetForTesting()
+    }
+
+    @After
+    fun tearDown() {
+        System.clearProperty("litepal.generated.registry")
+        GeneratedRegistryLocator.resetForTesting()
+    }
 
     @Test
     fun reflectionCaches_shouldBeSharedAcrossInstances() {
@@ -77,5 +95,24 @@ class LitePalBaseReflectionCacheTest {
         var name: String? = null
         var score: Int = 0
         var tags: MutableList<String>? = null
+    }
+
+    class TestGeneratedRegistry : LitePalGeneratedRegistry {
+        override val schemaVersion: Int = 1
+        override val schemaJson: String = "{}"
+        override val schemaHash: String = "litepal-base-reflection-cache-test"
+        override val anchorClassName: String = "org.litepal.LitePalBaseReflectionCacheAnchor"
+        override val anchorEntities: List<String> = listOf(CacheModel::class.java.name)
+
+        override fun entityMetasByClassName(): Map<String, EntityMeta<out LitePalSupport>> {
+            return mapOf(
+                CacheModel::class.java.name to GeneratedEntityMeta(
+                    className = CacheModel::class.java.name,
+                    tableName = "CacheModel",
+                    supportedFields = listOf("name", "score"),
+                    supportedGenericFields = listOf("tags")
+                )
+            )
+        }
     }
 }

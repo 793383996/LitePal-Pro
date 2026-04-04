@@ -40,11 +40,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Core compile, lint, unit tests, publish dry-run
+      - name: Core compile, lint, parity, unit tests, publish dry-run
         run: |
           ./gradlew \
+            :compiler-common:test \
             :core:assembleDebug \
             :core:lint \
             :core:testDebugUnitTest \
+            verifyKspKaptGeneratedParity \
             :core:publishReleasePublicationToMavenLocal \
             --stacktrace

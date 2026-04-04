@@ -1,7 +1,5 @@
 package org.litepal.generated
 
-import org.litepal.GeneratedMetadataMode
-import org.litepal.LitePalRuntime
 import org.litepal.crud.LitePalSupport
 import org.litepal.util.LitePalLog
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,9 +24,7 @@ object GeneratedRegistryLocator {
             }
             loadedRegistry = loadRegistry()
             attempted.set(true)
-            if (loadedRegistry == null &&
-                LitePalRuntime.getRuntimeOptions().generatedMetadataMode == GeneratedMetadataMode.REQUIRED
-            ) {
+            if (loadedRegistry == null) {
                 throw IllegalStateException(
                     "Generated metadata is REQUIRED but no LitePal generated registry was found. " +
                         "Please configure KSP/KAPT and declare exactly one @LitePalSchemaAnchor."
@@ -39,7 +35,13 @@ object GeneratedRegistryLocator {
     }
 
     @JvmStatic
-    fun hasRegistry(): Boolean = registry() != null
+    fun hasRegistry(): Boolean {
+        return try {
+            registry() != null
+        } catch (_: IllegalStateException) {
+            false
+        }
+    }
 
     @JvmStatic
     fun anchorEntities(): List<String> = registry()?.anchorEntities.orEmpty()

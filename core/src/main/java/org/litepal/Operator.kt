@@ -26,6 +26,7 @@ import android.text.TextUtils
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import org.litepal.generated.GeneratedRegistryLocator
 import org.litepal.generated.SchemaValidationGate
 import org.litepal.crud.DeleteHandler
 import org.litepal.crud.LitePalSupport
@@ -131,6 +132,12 @@ object Operator {
     }
 
     @JvmStatic
+    internal fun <T> runOnQueryExecutor(block: () -> T): T = executeOnQueryPath(block)
+
+    @JvmStatic
+    internal fun <T> runOnTransactionExecutor(block: () -> T): T = executeOnWritePath(block)
+
+    @JvmStatic
     fun initialize(context: Context) {
         LitePalApplication.sContext = context.applicationContext
     }
@@ -158,6 +165,7 @@ object Operator {
 
     @JvmStatic
     fun beginTransaction() {
+        LitePalRuntime.onDatabaseMainThreadAccess("beginTransaction")
         DatabaseRuntimeLock.acquireReadLock()
         try {
             val existing = transactionContextHolder.get()
@@ -206,7 +214,7 @@ object Operator {
             litePalAttr.dbName = litePalDB.dbName
             litePalAttr.version = litePalDB.version
             litePalAttr.storage = litePalDB.storage
-            litePalAttr.setClassNames(litePalDB.getClassNames())
+            litePalAttr.setClassNames(GeneratedRegistryLocator.anchorEntities())
             if (!isDefaultDatabase(litePalDB.dbName)) {
                 litePalAttr.extraKeyName = litePalDB.dbName
                 litePalAttr.cases = "lower"

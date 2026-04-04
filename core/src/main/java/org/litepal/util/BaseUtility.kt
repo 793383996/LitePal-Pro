@@ -22,7 +22,6 @@ import org.litepal.LitePalApplication
 import org.litepal.exceptions.LitePalSupportException
 import org.litepal.parser.LitePalAttr
 import java.io.IOException
-import java.lang.reflect.Method
 import java.util.Locale
 
 object BaseUtility {
@@ -138,15 +137,4 @@ object BaseUtility {
         return false
     }
 
-    @JvmStatic
-    fun isClassAndMethodExist(className: String, methodName: String): Boolean {
-        return try {
-            val clazz = Class.forName(className)
-            val methods: Array<Method> = clazz.methods
-            methods.any { methodName == it.name }
-        } catch (e: Exception) {
-            LitePalLog.e("BaseUtility", "Failed to inspect class/method existence.", e)
-            false
-        }
-    }
 }

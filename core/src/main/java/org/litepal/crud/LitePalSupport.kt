@@ -36,55 +36,61 @@ open class LitePalSupport protected constructor() {
     private var fieldsToSetToDefault: MutableList<String>? = null
 
     fun delete(): Int {
-        DatabaseRuntimeLock.withReadLock {
-            val db = Connector.getDatabase()
-            db.beginTransaction()
-            try {
-                val deleteHandler = DeleteHandler(db)
-                val rowsAffected = deleteHandler.onDelete(this)
-                baseObjId = 0
-                db.setTransactionSuccessful()
-                return rowsAffected
-            } finally {
-                db.endTransaction()
+        return Operator.runOnTransactionExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val db = Connector.getDatabase()
+                db.beginTransaction()
+                try {
+                    val deleteHandler = DeleteHandler(db)
+                    val rowsAffected = deleteHandler.onDelete(this)
+                    baseObjId = 0
+                    db.setTransactionSuccessful()
+                    rowsAffected
+                } finally {
+                    db.endTransaction()
+                }
             }
         }
     }
 
 
     fun update(id: Long): Int {
-        DatabaseRuntimeLock.withReadLock {
-            val db = Connector.getDatabase()
-            db.beginTransaction()
-            try {
-                val updateHandler = UpdateHandler(Connector.getDatabase())
-                val rowsAffected = updateHandler.onUpdate(this, id)
-                getFieldsToSetToDefault().clear()
-                db.setTransactionSuccessful()
-                return rowsAffected
-            } catch (e: Exception) {
-                throw LitePalSupportException(e.message, e)
-            } finally {
-                db.endTransaction()
+        return Operator.runOnTransactionExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val db = Connector.getDatabase()
+                db.beginTransaction()
+                try {
+                    val updateHandler = UpdateHandler(Connector.getDatabase())
+                    val rowsAffected = updateHandler.onUpdate(this, id)
+                    getFieldsToSetToDefault().clear()
+                    db.setTransactionSuccessful()
+                    rowsAffected
+                } catch (e: Exception) {
+                    throw LitePalSupportException(e.message, e)
+                } finally {
+                    db.endTransaction()
+                }
             }
         }
     }
 
 
     fun updateAll(vararg conditions: String): Int {
-        DatabaseRuntimeLock.withReadLock {
-            val db = Connector.getDatabase()
-            db.beginTransaction()
-            try {
-                val updateHandler = UpdateHandler(Connector.getDatabase())
-                val rowsAffected = updateHandler.onUpdateAll(this, *conditions)
-                getFieldsToSetToDefault().clear()
-                db.setTransactionSuccessful()
-                return rowsAffected
-            } catch (e: Exception) {
-                throw LitePalSupportException(e.message, e)
-            } finally {
-                db.endTransaction()
+        return Operator.runOnTransactionExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val db = Connector.getDatabase()
+                db.beginTransaction()
+                try {
+                    val updateHandler = UpdateHandler(Connector.getDatabase())
+                    val rowsAffected = updateHandler.onUpdateAll(this, *conditions)
+                    getFieldsToSetToDefault().clear()
+                    db.setTransactionSuccessful()
+                    rowsAffected
+                } catch (e: Exception) {
+                    throw LitePalSupportException(e.message, e)
+                } finally {
+                    db.endTransaction()
+                }
             }
         }
     }
@@ -102,48 +108,54 @@ open class LitePalSupport protected constructor() {
 
 
     fun saveThrows() {
-        DatabaseRuntimeLock.withReadLock {
-            val db = Connector.getDatabase()
-            db.beginTransaction()
-            try {
-                val saveHandler = SaveHandler(db)
-                saveHandler.onSave(this)
-                clearAssociatedData()
-                db.setTransactionSuccessful()
-            } catch (e: Exception) {
-                throw LitePalSupportException(e.message, e)
-            } finally {
-                db.endTransaction()
+        Operator.runOnTransactionExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                val db = Connector.getDatabase()
+                db.beginTransaction()
+                try {
+                    val saveHandler = SaveHandler(db)
+                    saveHandler.onSave(this)
+                    clearAssociatedData()
+                    db.setTransactionSuccessful()
+                } catch (e: Exception) {
+                    throw LitePalSupportException(e.message, e)
+                } finally {
+                    db.endTransaction()
+                }
             }
         }
     }
 
     @Suppress("UNCHECKED_CAST")
     fun saveOrUpdate(vararg conditions: String): Boolean {
-        DatabaseRuntimeLock.withReadLock {
-            if (conditions.isEmpty()) {
-                return save()
-            }
-            val list = Operator.where(*conditions).find(javaClass) as List<LitePalSupport>
-            if (list.isEmpty()) {
-                return save()
-            }
-            val db = Connector.getDatabase()
-            db.beginTransaction()
-            return try {
-                for (support in list) {
-                    baseObjId = support.baseObjId
-                    val saveHandler = SaveHandler(db)
-                    saveHandler.onSave(this)
-                    clearAssociatedData()
+        return Operator.runOnTransactionExecutor {
+            DatabaseRuntimeLock.withReadLock {
+                if (conditions.isEmpty()) {
+                    return@withReadLock save()
                 }
-                db.setTransactionSuccessful()
-                true
-            } catch (e: Exception) {
-                LitePalRuntime.onError("LitePalSupport", "saveOrUpdate", e)
-                false
-            } finally {
-                db.endTransaction()
+                val list = Operator.runOnQueryExecutor {
+                    Operator.where(*conditions).find(javaClass) as List<LitePalSupport>
+                }
+                if (list.isEmpty()) {
+                    return@withReadLock save()
+                }
+                val db = Connector.getDatabase()
+                db.beginTransaction()
+                try {
+                    for (support in list) {
+                        baseObjId = support.baseObjId
+                        val saveHandler = SaveHandler(db)
+                        saveHandler.onSave(this)
+                        clearAssociatedData()
+                    }
+                    db.setTransactionSuccessful()
+                    true
+                } catch (e: Exception) {
+                    LitePalRuntime.onError("LitePalSupport", "saveOrUpdate", e)
+                    false
+                } finally {
+                    db.endTransaction()
+                }
             }
         }
     }

@@ -19,13 +19,13 @@ package org.litepal.crud
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import android.os.Build
-import org.litepal.annotation.Encrypt
 import org.litepal.crud.model.AssociationsInfo
 import org.litepal.exceptions.LitePalSupportException
+import org.litepal.generated.GeneratedFieldMeta
+import org.litepal.generated.GeneratedGenericFieldMeta
 import org.litepal.util.BaseUtility
 import org.litepal.util.DBUtility
-import java.lang.reflect.Field
-import java.lang.reflect.InvocationTargetException
+import java.util.LinkedHashMap
 
 class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
 
@@ -37,8 +37,7 @@ class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun onUpdate(baseObj: LitePalSupport, id: Long): Int {
         val supportedFields = getSupportedFields(baseObj.getClassName())
@@ -67,8 +66,7 @@ class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     fun onUpdateAll(baseObj: LitePalSupport, vararg conditions: String): Int {
         val conditionArray = arrayOf(*conditions)
@@ -120,26 +118,31 @@ class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
         var fieldName: String? = null
         try {
             val emptyModel = getEmptyModel(baseObj)
-            val emptyModelClass = emptyModel.javaClass
+            val fieldsByName = LinkedHashMap<String, GeneratedFieldMeta>()
+            val genericFieldsByName = LinkedHashMap<String, GeneratedGenericFieldMeta>()
+            getSupportedFields(baseObj.getClassName()).forEach { field ->
+                fieldsByName[field.propertyName] = field
+            }
+            getSupportedGenericFields(baseObj.getClassName()).forEach { field ->
+                genericFieldsByName[field.propertyName] = field
+            }
             for (name in baseObj.getFieldsToSetToDefault()) {
                 if (!isIdColumn(name)) {
                     fieldName = name
-                    val field = emptyModelClass.getDeclaredField(fieldName)
-                    if (isCollection(field.type)) {
+                    val genericField = genericFieldsByName[fieldName]
+                    if (genericField != null) {
                         if (ids.isNotEmpty()) {
-                            val genericTypeName = getGenericTypeName(field)
-                            if (BaseUtility.isGenericTypeSupported(genericTypeName)) {
-                                val tableName = DBUtility.getGenericTableName(baseObj.getClassName(), field.name)
-                                val genericValueIdColumnName = DBUtility.getGenericValueIdColumnName(baseObj.getClassName())
-                                deleteByIds(
-                                    tableName.orEmpty(),
-                                    genericValueIdColumnName.orEmpty(),
-                                    ids.toList()
-                                )
-                            }
+                            val tableName = DBUtility.getGenericTableName(baseObj.getClassName(), genericField.propertyName)
+                            val genericValueIdColumnName = DBUtility.getGenericValueIdColumnName(baseObj.getClassName())
+                            deleteByIds(
+                                tableName.orEmpty(),
+                                genericValueIdColumnName.orEmpty(),
+                                ids.toList()
+                            )
                         }
                     } else {
-                        putContentValuesForUpdate(emptyModel, field, values)
+                        val field = fieldsByName[fieldName] ?: throw NoSuchFieldException(fieldName)
+                        putDefaultValueForUpdate(emptyModel, field, values)
                     }
                 }
             }
@@ -195,24 +198,22 @@ class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
         return rowsAffected
     }
 
-    @Throws(IllegalAccessException::class, InvocationTargetException::class)
+    @Throws(IllegalAccessException::class)
     private fun updateGenericTables(
         baseObj: LitePalSupport,
-        supportedGenericFields: List<Field>,
+        supportedGenericFields: List<GeneratedGenericFieldMeta>,
         vararg ids: Long
     ) {
         if (ids.isNotEmpty()) {
             for (field in supportedGenericFields) {
-                val annotation = field.getAnnotation(Encrypt::class.java)
                 var algorithm: String? = null
-                val genericTypeName = getGenericTypeName(field)
-                if (annotation != null && "java.lang.String" == genericTypeName) {
-                    algorithm = annotation.algorithm
+                val genericTypeName = field.elementTypeName
+                if (!field.encryptAlgorithm.isNullOrBlank() && "java.lang.String" == genericTypeName) {
+                    algorithm = field.encryptAlgorithm
                 }
-                field.isAccessible = true
-                val collection = field[baseObj] as? Collection<*>
+                val collection = getFieldValue(baseObj, field.propertyName) as? Collection<*>
                 if (!collection.isNullOrEmpty()) {
-                    val tableName = DBUtility.getGenericTableName(baseObj.getClassName(), field.name)
+                    val tableName = DBUtility.getGenericTableName(baseObj.getClassName(), field.propertyName)
                     val genericValueIdColumnName = DBUtility.getGenericValueIdColumnName(baseObj.getClassName())
                     deleteByIds(
                         tableName.orEmpty(),
@@ -228,14 +229,12 @@ class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
                                 val dataSupport = objectValue as? LitePalSupport ?: continue
                                 val baseObjId = dataSupport.getBaseObjId()
                                 if (baseObjId <= 0) continue
-                                values.put(DBUtility.getM2MSelfRefColumnName(field), baseObjId)
+                                values.put(DBUtility.getM2MSelfRefColumnName(field.propertyName), baseObjId)
                             } else {
-                                val parameters = arrayOf(
-                                    DBUtility.convertToValidColumnName(org.litepal.util.BaseUtility.changeCase(field.name)),
-                                    objectValue
-                                )
-                                val parameterTypes = arrayOf<Class<*>>(String::class.java, getGenericTypeClass(field)!!)
-                                DynamicExecutor.send(values, "put", parameters, values.javaClass, parameterTypes)
+                                val genericColumnName = org.litepal.util.BaseUtility.changeCase(
+                                    DBUtility.convertToValidColumnName(field.propertyName)
+                                ).orEmpty()
+                                putGeneratedContentValue(values, genericColumnName, objectValue)
                             }
                             mDatabase.insert(tableName.orEmpty(), null, values)
                         }
@@ -243,6 +242,18 @@ class UpdateHandler(db: SQLiteDatabase) : DataHandler() {
                 }
             }
         }
+    }
+
+    private fun putDefaultValueForUpdate(
+        emptyModel: LitePalSupport,
+        field: GeneratedFieldMeta,
+        values: ContentValues
+    ) {
+        var fieldValue = getFieldValue(emptyModel, field.propertyName)
+        if (field.typeName == "java.lang.String" && !field.encryptAlgorithm.isNullOrBlank()) {
+            fieldValue = encryptValue(field.encryptAlgorithm, fieldValue)
+        }
+        putGeneratedContentValue(values, field.columnName, fieldValue)
     }
 
     private fun convertContentValues(values: ContentValues) {

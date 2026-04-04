@@ -19,8 +19,6 @@ package org.litepal.crud
 import org.litepal.crud.model.AssociationsInfo
 import org.litepal.exceptions.LitePalSupportException
 import org.litepal.util.DBUtility
-import java.lang.reflect.Field
-import java.lang.reflect.InvocationTargetException
 
 abstract class AssociationsAnalyzer : DataHandler() {
 
@@ -28,8 +26,7 @@ abstract class AssociationsAnalyzer : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     protected fun getReverseAssociatedModels(
         associatedModel: LitePalSupport,
@@ -46,8 +43,7 @@ abstract class AssociationsAnalyzer : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     protected fun setReverseAssociatedModels(
         associatedModel: LitePalSupport,
@@ -63,11 +59,11 @@ abstract class AssociationsAnalyzer : DataHandler() {
 
     protected fun checkAssociatedModelCollection(
         associatedModelCollection: Collection<LitePalSupport>?,
-        associatedField: Field
+        collectionType: String?
     ): MutableCollection<LitePalSupport> {
         val collection: MutableCollection<LitePalSupport> = when {
-            isList(associatedField.type) -> ArrayList<LitePalSupport>()
-            isSet(associatedField.type) -> HashSet<LitePalSupport>()
+            isList(collectionType) -> ArrayList<LitePalSupport>()
+            isSet(collectionType) -> HashSet<LitePalSupport>()
             else -> throw LitePalSupportException(LitePalSupportException.WRONG_FIELD_TYPE_FOR_ASSOCIATIONS)
         }
         if (associatedModelCollection != null) {
@@ -80,8 +76,7 @@ abstract class AssociationsAnalyzer : DataHandler() {
         SecurityException::class,
         IllegalArgumentException::class,
         NoSuchMethodException::class,
-        IllegalAccessException::class,
-        InvocationTargetException::class
+        IllegalAccessException::class
     )
     protected fun buildBidirectionalAssociations(
         baseObj: LitePalSupport,

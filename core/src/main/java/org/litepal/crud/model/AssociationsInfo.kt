@@ -16,15 +16,16 @@
 
 package org.litepal.crud.model
 
-import java.lang.reflect.Field
 import java.util.Locale
 
 class AssociationsInfo {
     private var selfClassName: String? = null
     private var associatedClassName: String? = null
     private var classHoldsForeignKey: String? = null
-    private var associateOtherModelFromSelf: Field? = null
-    private var associateSelfFromOtherModel: Field? = null
+    private var associateOtherModelFromSelf: String? = null
+    private var associateSelfFromOtherModel: String? = null
+    private var associateOtherModelCollectionType: String? = null
+    private var associateSelfCollectionType: String? = null
     private var associationType: Int = 0
 
     fun getSelfClassName(): String? = selfClassName
@@ -45,16 +46,28 @@ class AssociationsInfo {
         this.classHoldsForeignKey = classHoldsForeignKey
     }
 
-    fun getAssociateOtherModelFromSelf(): Field? = associateOtherModelFromSelf
+    fun getAssociateOtherModelFromSelf(): String? = associateOtherModelFromSelf
 
-    fun setAssociateOtherModelFromSelf(associateOtherModelFromSelf: Field?) {
+    fun setAssociateOtherModelFromSelf(associateOtherModelFromSelf: String?) {
         this.associateOtherModelFromSelf = associateOtherModelFromSelf
     }
 
-    fun getAssociateSelfFromOtherModel(): Field? = associateSelfFromOtherModel
+    fun getAssociateSelfFromOtherModel(): String? = associateSelfFromOtherModel
 
-    fun setAssociateSelfFromOtherModel(associateSelfFromOtherModel: Field?) {
+    fun setAssociateSelfFromOtherModel(associateSelfFromOtherModel: String?) {
         this.associateSelfFromOtherModel = associateSelfFromOtherModel
+    }
+
+    fun getAssociateOtherModelCollectionType(): String? = associateOtherModelCollectionType
+
+    fun setAssociateOtherModelCollectionType(type: String?) {
+        associateOtherModelCollectionType = normalizeCollectionType(type)
+    }
+
+    fun getAssociateSelfCollectionType(): String? = associateSelfCollectionType
+
+    fun setAssociateSelfCollectionType(type: String?) {
+        associateSelfCollectionType = normalizeCollectionType(type)
     }
 
     fun getAssociationType(): Int = associationType
@@ -62,6 +75,10 @@ class AssociationsInfo {
     fun setAssociationType(associationType: Int) {
         this.associationType = associationType
     }
+
+    fun isAssociateOtherModelCollection(): Boolean = associateOtherModelCollectionType != null
+
+    fun isAssociateSelfCollection(): Boolean = associateSelfCollectionType != null
 
     override fun equals(other: Any?): Boolean {
         if (other !is AssociationsInfo) return false
@@ -99,5 +116,13 @@ class AssociationsInfo {
         result = 31 * result + first.hashCode()
         result = 31 * result + second.hashCode()
         return result
+    }
+
+    private fun normalizeCollectionType(type: String?): String? {
+        val normalized = type?.trim()?.uppercase(Locale.US) ?: return null
+        return when (normalized) {
+            "LIST", "SET" -> normalized
+            else -> null
+        }
     }
 }

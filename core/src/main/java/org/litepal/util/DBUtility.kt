@@ -23,8 +23,8 @@ import android.util.Pair
 import org.litepal.exceptions.DatabaseGenerateException
 import org.litepal.tablemanager.model.ColumnModel
 import org.litepal.tablemanager.model.TableModel
-import java.lang.reflect.Field
 import java.util.Locale
+import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 object DBUtility {
@@ -209,8 +209,8 @@ object DBUtility {
     }
 
     @JvmStatic
-    fun getM2MSelfRefColumnName(field: Field): String {
-        return BaseUtility.changeCase("${field.name}_id").orEmpty()
+    fun getM2MSelfRefColumnName(propertyName: String): String {
+        return BaseUtility.changeCase("${propertyName}_id").orEmpty()
     }
 
     @JvmStatic
@@ -629,17 +629,19 @@ object DBUtility {
     fun convertWhereClauseToColumnName(whereClause: String?): String? {
         if (!TextUtils.isEmpty(whereClause)) {
             try {
+                val nonNullWhereClause = whereClause ?: return whereClause
                 val convertedWhereClause = StringBuffer()
                 val p = Pattern.compile(
                     "(\\w+$REG_OPERATOR|\\w+$REG_FUZZY|\\w+$REG_COLLECTION)"
                 )
-                val m = p.matcher(whereClause)
+                val m = p.matcher(nonNullWhereClause)
                 while (m.find()) {
                     val matches = m.group()
                     var column = matches.replace("($REG_OPERATOR|$REG_FUZZY|$REG_COLLECTION)".toRegex(), "")
                     val rest = matches.replace(column, "")
                     column = convertToValidColumnName(column) ?: column
-                    m.appendReplacement(convertedWhereClause, column + rest)
+                    val replacement = Matcher.quoteReplacement(column + rest)
+                    m.appendReplacement(convertedWhereClause, replacement)
                 }
                 m.appendTail(convertedWhereClause)
                 return convertedWhereClause.toString()

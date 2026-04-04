@@ -20,10 +20,10 @@ import android.database.sqlite.SQLiteDatabase
 import android.text.TextUtils
 import org.litepal.crud.model.AssociationsInfo
 import org.litepal.exceptions.LitePalSupportException
+import org.litepal.generated.GeneratedGenericFieldMeta
 import org.litepal.util.BaseUtility
 import org.litepal.util.Const
 import org.litepal.util.DBUtility
-import java.lang.reflect.Field
 
 class DeleteHandler(db: SQLiteDatabase) : DataHandler() {
 
@@ -215,12 +215,16 @@ class DeleteHandler(db: SQLiteDatabase) : DataHandler() {
         return foreignKeyTableToDelete!!
     }
 
-    private fun deleteGenericData(modelClass: Class<*>, supportedGenericFields: List<Field>, vararg ids: Long) {
+    private fun deleteGenericData(
+        modelClass: Class<*>,
+        supportedGenericFields: List<GeneratedGenericFieldMeta>,
+        vararg ids: Long
+    ) {
         if (ids.isEmpty()) {
             return
         }
         for (field in supportedGenericFields) {
-            val tableName = DBUtility.getGenericTableName(modelClass.name, field.name)
+            val tableName = DBUtility.getGenericTableName(modelClass.name, field.propertyName)
             val genericValueIdColumnName = DBUtility.getGenericValueIdColumnName(modelClass.name)
             val maxExpressionCount = 500
             val length = ids.size

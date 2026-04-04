@@ -8,6 +8,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.litepal.crud.LitePalSupport
 import org.litepal.extension.runInTransaction
+import org.litepal.generated.EntityMeta
+import org.litepal.generated.GeneratedEntityMeta
+import org.litepal.generated.GeneratedRegistryLocator
+import org.litepal.generated.LitePalGeneratedRegistry
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import java.util.concurrent.Executor
@@ -21,9 +25,16 @@ class OperatorExecutorRoutingTest {
     @Before
     fun setUp() {
         LitePal.initialize(RuntimeEnvironment.getApplication())
+        System.setProperty("litepal.generated.registry", RoutingTestRegistry::class.java.name)
+        GeneratedRegistryLocator.resetForTesting()
+        LitePal.setRuntimeOptions(
+            LitePalRuntimeOptions(
+                allowMainThreadAccess = true,
+                schemaValidationMode = SchemaValidationMode.LOG
+            )
+        )
         testDbName = "operator_exec_${System.currentTimeMillis()}"
         val db = LitePalDB(testDbName, 1)
-        db.addClassName(DispatchModel::class.java.name)
         LitePal.use(db)
         LitePal.getDatabase()
     }
@@ -33,6 +44,8 @@ class OperatorExecutorRoutingTest {
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions())
         LitePal.useDefault()
         LitePal.deleteDatabase(testDbName)
+        System.clearProperty("litepal.generated.registry")
+        GeneratedRegistryLocator.resetForTesting()
     }
 
     @Test
@@ -49,6 +62,8 @@ class OperatorExecutorRoutingTest {
         }
         LitePal.setRuntimeOptions(
             LitePalRuntimeOptions(
+                allowMainThreadAccess = true,
+                schemaValidationMode = SchemaValidationMode.LOG,
                 queryExecutor = queryExecutor,
                 transactionExecutor = writeExecutor
             )
@@ -70,6 +85,8 @@ class OperatorExecutorRoutingTest {
         }
         LitePal.setRuntimeOptions(
             LitePalRuntimeOptions(
+                allowMainThreadAccess = true,
+                schemaValidationMode = SchemaValidationMode.LOG,
                 queryExecutor = queryExecutor
             )
         )
@@ -85,6 +102,25 @@ class OperatorExecutorRoutingTest {
 
     class DispatchModel : LitePalSupport() {
         var name: String? = null
+    }
+
+    class RoutingTestRegistry : LitePalGeneratedRegistry {
+        override val schemaVersion: Int = 1
+        override val schemaJson: String = "{}"
+        override val schemaHash: String = "operator-executor-routing-test"
+        override val anchorClassName: String = "org.litepal.OperatorExecutorRoutingAnchor"
+        override val anchorEntities: List<String> = listOf(DispatchModel::class.java.name)
+
+        override fun entityMetasByClassName(): Map<String, EntityMeta<out LitePalSupport>> {
+            return mapOf(
+                DispatchModel::class.java.name to GeneratedEntityMeta(
+                    className = DispatchModel::class.java.name,
+                    tableName = DispatchModel::class.java.name.substringAfterLast('.'),
+                    supportedFields = listOf("name"),
+                    supportedGenericFields = emptyList()
+                )
+            )
+        }
     }
 }
 

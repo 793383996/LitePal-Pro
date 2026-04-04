@@ -19,23 +19,19 @@ package org.litepal.crud
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import android.util.SparseArray
 import org.litepal.LitePalBase
 import org.litepal.LitePalRuntime
-import org.litepal.annotation.Column
-import org.litepal.annotation.Encrypt
 import org.litepal.crud.model.AssociationsInfo
-import org.litepal.exceptions.DatabaseGenerateException
 import org.litepal.exceptions.LitePalSupportException
+import org.litepal.generated.GeneratedFieldMeta
+import org.litepal.generated.GeneratedGenericFieldMeta
 import org.litepal.generated.GeneratedRegistryLocator
+import org.litepal.generated.PropertyAccessor
 import org.litepal.util.BaseUtility
 import org.litepal.util.Const
 import org.litepal.util.DBUtility
 import org.litepal.util.LitePalLog
 import org.litepal.util.cipher.CipherUtil
-import java.lang.reflect.Constructor
-import java.lang.reflect.Field
-import java.lang.reflect.Method
 import java.util.Date
 import java.util.LinkedHashSet
 import java.util.concurrent.ConcurrentHashMap
@@ -79,7 +75,6 @@ abstract class DataHandler : LitePalBase() {
             )
             if (cursor.moveToFirst()) {
                 val hasCurrentModelForeignKeys = !foreignKeyAssociations.isNullOrEmpty()
-                val queryInfoCacheSparseArray = SparseArray<QueryInfoCache>()
                 @Suppress("UNCHECKED_CAST")
                 val generatedCursorMapper = GeneratedRegistryLocator
                     .findEntityMeta(modelClass.name)
@@ -99,12 +94,8 @@ abstract class DataHandler : LitePalBase() {
                         LitePalRuntime.recordGeneratedPathHit("query.cursorMapper")
                         generatedCursorMapper.mapFromCursor(baseObj, cursor)
                     } else {
-                        LitePalRuntime.recordReflectionFallback("query.setValueToModel")
-                        setValueToModel(
-                            modelInstance,
-                            supportedFields,
-                            cursor,
-                            queryInfoCacheSparseArray
+                        throw IllegalStateException(
+                            "Generated cursor mapper is REQUIRED but missing for ${modelClass.name}."
                         )
                     }
                     if (hasCurrentModelForeignKeys) {
@@ -119,7 +110,6 @@ abstract class DataHandler : LitePalBase() {
                     baseObjs.add(baseObj)
                     dataList.add(modelInstance)
                 } while (cursor.moveToNext())
-                queryInfoCacheSparseArray.clear()
                 if (baseObjs.isNotEmpty()) {
                     if (hasCurrentModelForeignKeys) {
                         attachCurrentModelForeignKeyAssociations(
@@ -163,8 +153,7 @@ abstract class DataHandler : LitePalBase() {
                 null
             )
             if (cursor.moveToFirst()) {
-                val method = getCursorGetter(cursor.javaClass, genGetColumnMethod(type))
-                result = method.invoke(cursor, 0) as T
+                result = readMathQueryValue(cursor, type)
             }
         } catch (e: Exception) {
             throw LitePalSupportException(e.message, e)
@@ -174,15 +163,36 @@ abstract class DataHandler : LitePalBase() {
         return result as T
     }
 
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> readMathQueryValue(cursor: Cursor, type: Class<T>): T {
+        return when {
+            type == Int::class.java || type == Integer.TYPE -> cursor.getInt(0) as T
+            type == Long::class.java || type == java.lang.Long.TYPE -> cursor.getLong(0) as T
+            type == Short::class.java || type == java.lang.Short.TYPE -> cursor.getShort(0) as T
+            type == Float::class.java || type == java.lang.Float.TYPE -> cursor.getFloat(0) as T
+            type == Double::class.java || type == java.lang.Double.TYPE -> cursor.getDouble(0) as T
+            type == Boolean::class.java || type == java.lang.Boolean.TYPE -> (cursor.getInt(0) == 1) as T
+            type == Char::class.java || type == java.lang.Character.TYPE -> {
+                val value = cursor.getString(0)
+                (value?.firstOrNull() ?: '\u0000') as T
+            }
+            type == Date::class.java -> {
+                val dateValue = cursor.getLong(0)
+                Date(dateValue) as T
+            }
+            else -> cursor.getString(0) as T
+        }
+    }
+
     protected fun giveBaseObjIdValue(baseObj: LitePalSupport, id: Long) {
         if (id > 0) {
-            DynamicExecutor.set(baseObj, "baseObjId", id, LitePalSupport::class.java)
+            baseObj.assignBaseObjId(id)
         }
     }
 
     protected fun putFieldsValue(
         baseObj: LitePalSupport,
-        supportedFields: List<Field>,
+        supportedFields: List<GeneratedFieldMeta>,
         values: ContentValues
     ) {
         @Suppress("UNCHECKED_CAST")
@@ -198,91 +208,16 @@ abstract class DataHandler : LitePalBase() {
                 return
             }
             if (isUpdating()) {
-                // Keep update semantics compatible with legacy reflection path:
-                // skip fields holding constructor defaults unless explicitly setToDefault().
-                LitePalRuntime.recordReflectionFallback("write.fieldBinder.update.compat")
-                for (field in supportedFields) {
-                    if (!isIdColumn(field.name)) {
-                        putFieldsValueDependsOnSaveOrUpdate(baseObj, field, values)
-                    }
+                LitePalRuntime.recordGeneratedPathHit("write.fieldBinder.update")
+                generatedBinder.bindForUpdate(baseObj) { column, value ->
+                    putGeneratedContentValue(values, column, value)
                 }
                 return
             }
         }
-        LitePalRuntime.recordReflectionFallback("write.putFieldsValue")
-        for (field in supportedFields) {
-            if (!isIdColumn(field.name)) {
-                putFieldsValueDependsOnSaveOrUpdate(baseObj, field, values)
-            }
-        }
-    }
-
-    protected fun putContentValuesForSave(
-        baseObj: LitePalSupport,
-        field: Field,
-        values: ContentValues
-    ) {
-        var fieldValue = getFieldValue(baseObj, field)
-        if ("java.util.Date" == field.type.name) {
-            if (fieldValue != null) {
-                fieldValue = (fieldValue as Date).time
-            } else {
-                val annotation = field.getAnnotation(Column::class.java)
-                if (annotation != null) {
-                    val defaultValue = annotation.defaultValue
-                    if (defaultValue.isNotEmpty()) {
-                        try {
-                            fieldValue = defaultValue.toLong()
-                        } catch (_: NumberFormatException) {
-                            LitePalLog.w(
-                                TAG,
-                                "$field in ${baseObj.javaClass} with invalid defaultValue. So we use null instead"
-                            )
-                        }
-                    }
-                }
-                if (fieldValue == null) {
-                    fieldValue = Long.MAX_VALUE
-                }
-            }
-        }
-        if (fieldValue != null) {
-            val annotation = field.getAnnotation(Encrypt::class.java)
-            if (annotation != null && "java.lang.String" == field.type.name) {
-                fieldValue = encryptValue(annotation.algorithm, fieldValue)
-            }
-            val parameters = arrayOf(
-                BaseUtility.changeCase(DBUtility.convertToValidColumnName(field.name)),
-                fieldValue
-            )
-            val parameterTypes = getParameterTypes(field, fieldValue, parameters)
-            DynamicExecutor.send(values, "put", parameters, values.javaClass, parameterTypes)
-        }
-    }
-
-    protected fun putContentValuesForUpdate(
-        baseObj: LitePalSupport,
-        field: Field,
-        values: ContentValues
-    ) {
-        var fieldValue = getFieldValue(baseObj, field)
-        if ("java.util.Date" == field.type.name) {
-            fieldValue = if (fieldValue != null) {
-                (fieldValue as Date).time
-            } else {
-                Long.MAX_VALUE
-            }
-        }
-        val annotation = field.getAnnotation(Encrypt::class.java)
-        if (annotation != null && "java.lang.String" == field.type.name) {
-            fieldValue = encryptValue(annotation.algorithm, fieldValue)
-        }
-        val parameters = arrayOf(
-            BaseUtility.changeCase(DBUtility.convertToValidColumnName(field.name)),
-            fieldValue
+        throw IllegalStateException(
+            "Generated field binder is REQUIRED but missing for ${baseObj.getClassName()}."
         )
-        val parameterTypes = getParameterTypes(field, fieldValue, parameters)
-        DynamicExecutor.send(values, "put", parameters, values.javaClass, parameterTypes)
     }
 
     protected fun encryptValue(algorithm: String?, fieldValue: Any?): Any? {
@@ -297,16 +232,20 @@ abstract class DataHandler : LitePalBase() {
         return encryptedValue
     }
 
-    protected fun getFieldValue(dataSupport: LitePalSupport, field: Field?): Any? {
-        if (shouldGetOrSet(dataSupport, field)) {
-            return DynamicExecutor.getField(dataSupport, field!!.name, dataSupport.javaClass)
+    protected fun getFieldValue(dataSupport: LitePalSupport, propertyName: String?): Any? {
+        if (shouldGetOrSet(dataSupport, propertyName)) {
+            val accessor = getRequiredPropertyAccessor(dataSupport.getClassName())
+            LitePalRuntime.recordGeneratedPathHit("propertyAccessor.get")
+            return accessor.get(dataSupport, propertyName.orEmpty())
         }
         return null
     }
 
-    protected fun setFieldValue(dataSupport: LitePalSupport, field: Field?, parameter: Any?) {
-        if (shouldGetOrSet(dataSupport, field)) {
-            DynamicExecutor.setField(dataSupport, field!!.name, parameter, dataSupport.javaClass)
+    protected fun setFieldValue(dataSupport: LitePalSupport, propertyName: String?, parameter: Any?) {
+        if (shouldGetOrSet(dataSupport, propertyName)) {
+            val accessor = getRequiredPropertyAccessor(dataSupport.getClassName())
+            LitePalRuntime.recordGeneratedPathHit("propertyAccessor.set")
+            accessor.set(dataSupport, propertyName.orEmpty(), parameter)
         }
     }
 
@@ -349,19 +288,11 @@ abstract class DataHandler : LitePalBase() {
         if (tempEmptyModel != null) {
             return tempEmptyModel!!
         }
-        var className: String? = null
         try {
-            className = baseObj.getClassName()
-            val modelClass = Class.forName(className)
-            tempEmptyModel = modelClass.newInstance() as LitePalSupport
+            @Suppress("UNCHECKED_CAST")
+            val modelClass = baseObj.javaClass as Class<out LitePalSupport>
+            tempEmptyModel = createInstanceFromClass(modelClass) as LitePalSupport
             return tempEmptyModel!!
-        } catch (_: ClassNotFoundException) {
-            throw DatabaseGenerateException(DatabaseGenerateException.CLASS_NOT_FOUND + className)
-        } catch (e: InstantiationException) {
-            throw LitePalSupportException(
-                className + LitePalSupportException.INSTANTIATION_EXCEPTION,
-                e
-            )
         } catch (e: Exception) {
             throw LitePalSupportException(e.message, e)
         }
@@ -454,8 +385,8 @@ abstract class DataHandler : LitePalBase() {
         return BaseUtility.changeCase("id in (${ids.joinToString(",")})").orEmpty()
     }
 
-    protected fun shouldGetOrSet(dataSupport: LitePalSupport?, field: Field?): Boolean {
-        return dataSupport != null && field != null
+    protected fun shouldGetOrSet(dataSupport: LitePalSupport?, propertyName: String?): Boolean {
+        return dataSupport != null && !propertyName.isNullOrBlank()
     }
 
     protected fun getIntermediateTableName(
@@ -480,109 +411,9 @@ abstract class DataHandler : LitePalBase() {
             LitePalRuntime.recordGeneratedPathHit("entityFactory.newInstance")
             return generatedFactory.newInstance()
         }
-        LitePalRuntime.recordReflectionFallback("constructor.newInstance")
-        try {
-            val constructor = findBestSuitConstructor(modelClass)
-            return constructor.newInstance(*getConstructorParams(modelClass, constructor))
-        } catch (e: Exception) {
-            throw LitePalSupportException(e.message, e)
-        }
-    }
-
-    protected fun findBestSuitConstructor(modelClass: Class<*>): Constructor<*> {
-        val cachedConstructor = CONSTRUCTOR_CACHE[modelClass.name]
-        if (cachedConstructor != null) {
-            return cachedConstructor
-        }
-        val constructors = modelClass.declaredConstructors
-        if (constructors.isEmpty()) {
-            throw LitePalSupportException("${modelClass.name} has no constructor. LitePal could not handle it")
-        }
-        var bestSuitConstructor: Constructor<*>? = null
-        var minConstructorParamLength = Int.MAX_VALUE
-        for (constructor in constructors) {
-            val types = constructor.parameterTypes
-            var canUseThisConstructor = true
-            for (parameterType in types) {
-                val parameterTypeName = parameterType.name
-                if (
-                    parameterType == modelClass ||
-                    parameterTypeName.startsWith("com.android") &&
-                    parameterTypeName.endsWith("InstantReloadException")
-                ) {
-                    canUseThisConstructor = false
-                    break
-                }
-            }
-            if (canUseThisConstructor && types.size < minConstructorParamLength) {
-                bestSuitConstructor = constructor
-                minConstructorParamLength = types.size
-            }
-        }
-        if (bestSuitConstructor != null) {
-            bestSuitConstructor.isAccessible = true
-            CONSTRUCTOR_CACHE[modelClass.name] = bestSuitConstructor
-            return bestSuitConstructor
-        }
-        val builder = StringBuilder(modelClass.name)
-            .append(" has no suited constructor to new instance. Constructors defined in class:")
-        for (constructor in constructors) {
-            builder.append("\n").append(constructor.toString())
-        }
-        throw LitePalSupportException(builder.toString())
-    }
-
-    protected fun getConstructorParams(
-        modelClass: Class<*>,
-        constructor: Constructor<*>
-    ): Array<Any?> {
-        val paramTypes = constructor.parameterTypes
-        val params = arrayOfNulls<Any>(paramTypes.size)
-        for (i in paramTypes.indices) {
-            params[i] = getInitParamValue(modelClass, paramTypes[i])
-        }
-        return params
-    }
-
-    protected fun setValueToModel(
-        modelInstance: Any,
-        supportedFields: List<Field>,
-        cursor: Cursor,
-        sparseArray: SparseArray<QueryInfoCache>
-    ) {
-        val cacheSize = sparseArray.size()
-        if (cacheSize > 0) {
-            for (i in 0 until cacheSize) {
-                val columnIndex = sparseArray.keyAt(i)
-                val cache = sparseArray[columnIndex]
-                if (cache != null) {
-                    setToModelByReflection(
-                        modelInstance,
-                        cache.field,
-                        columnIndex,
-                        cache.getMethodName,
-                        cursor
-                    )
-                }
-            }
-        } else {
-            for (field in supportedFields) {
-                val getMethodName = genGetColumnMethod(field)
-                val columnName = if (isIdColumn(field.name)) {
-                    "id"
-                } else {
-                    DBUtility.convertToValidColumnName(field.name)
-                }
-                val columnIndex = cursor.getColumnIndex(BaseUtility.changeCase(columnName))
-                if (columnIndex != -1) {
-                    setToModelByReflection(modelInstance, field, columnIndex, getMethodName, cursor)
-                    val cache = QueryInfoCache()
-                    cache.getMethodName = getMethodName
-                    cache.field = field
-                    sparseArray.put(columnIndex, cache)
-                }
-            }
-        }
+        throw IllegalStateException(
+            "Generated entity factory is REQUIRED but missing for ${modelClass.name}."
+        )
     }
 
     protected fun getForeignKeyAssociations(className: String, isEager: Boolean): List<AssociationsInfo>? {
@@ -593,91 +424,7 @@ abstract class DataHandler : LitePalBase() {
         return null
     }
 
-    protected fun getParameterTypes(
-        field: Field,
-        fieldValue: Any?,
-        parameters: Array<Any?>
-    ): Array<Class<*>> {
-        return if (isCharType(field)) {
-            parameters[1] = fieldValue.toString()
-            arrayOf(String::class.java, String::class.java)
-        } else {
-            when {
-                field.type.isPrimitive -> {
-                    arrayOf(String::class.java, getObjectType(field.type)!!)
-                }
-                "java.util.Date" == field.type.name -> {
-                    arrayOf(String::class.java, java.lang.Long::class.java)
-                }
-                else -> {
-                    arrayOf(String::class.java, field.type)
-                }
-            }
-        }
-    }
-
-    private fun getObjectType(primitiveType: Class<*>?): Class<*>? {
-        if (primitiveType != null && primitiveType.isPrimitive) {
-            return when (primitiveType.name) {
-                "int" -> java.lang.Integer::class.java
-                "short" -> java.lang.Short::class.java
-                "long" -> java.lang.Long::class.java
-                "float" -> java.lang.Float::class.java
-                "double" -> java.lang.Double::class.java
-                "boolean" -> java.lang.Boolean::class.java
-                "char" -> java.lang.Character::class.java
-                else -> null
-            }
-        }
-        return null
-    }
-
-    private fun getInitParamValue(modelClass: Class<*>, paramType: Class<*>): Any? {
-        return when (paramType.name) {
-            "boolean", "java.lang.Boolean" -> false
-            "float", "java.lang.Float" -> 0f
-            "double", "java.lang.Double" -> 0.0
-            "int", "java.lang.Integer" -> 0
-            "long", "java.lang.Long" -> 0L
-            "short", "java.lang.Short" -> 0
-            "char", "java.lang.Character" -> ' '
-            "[B" -> ByteArray(0)
-            "[Ljava.lang.Byte;" -> emptyArray<Byte>()
-            "java.lang.String" -> ""
-            else -> {
-                if (modelClass == paramType) {
-                    null
-                } else {
-                    createInstanceFromClass(paramType)
-                }
-            }
-        }
-    }
-
-    private fun isCharType(field: Field): Boolean {
-        val type = field.type.name
-        return type == "char" || type.endsWith("Character")
-    }
-
-    private fun isPrimitiveBooleanType(field: Field): Boolean {
-        return "boolean" == field.type.name
-    }
-
-    private fun putFieldsValueDependsOnSaveOrUpdate(
-        baseObj: LitePalSupport,
-        field: Field,
-        values: ContentValues
-    ) {
-        if (isUpdating()) {
-            if (!isFieldWithDefaultValue(baseObj, field)) {
-                putContentValuesForUpdate(baseObj, field, values)
-            }
-        } else if (isSaving()) {
-            putContentValuesForSave(baseObj, field, values)
-        }
-    }
-
-    private fun putGeneratedContentValue(values: ContentValues, column: String, value: Any?) {
+    protected fun putGeneratedContentValue(values: ContentValues, column: String, value: Any?) {
         val validColumn = BaseUtility.changeCase(DBUtility.convertToValidColumnName(column)).orEmpty()
         when (value) {
             null -> values.putNull(validColumn)
@@ -702,74 +449,9 @@ abstract class DataHandler : LitePalBase() {
         return SaveHandler::class.java.name == javaClass.name
     }
 
-    private fun isFieldWithDefaultValue(baseObj: LitePalSupport, field: Field): Boolean {
-        val emptyModel = getEmptyModel(baseObj)
-        val realReturn = getFieldValue(baseObj, field)
-        val defaultReturn = getFieldValue(emptyModel, field)
-        if (realReturn != null && defaultReturn != null) {
-            return realReturn.toString() == defaultReturn.toString()
-        }
-        return realReturn == defaultReturn
-    }
-
-    protected fun makeGetterMethodName(field: Field): String {
-        var fieldName = field.name
-        val getterMethodPrefix = if (isPrimitiveBooleanType(field)) {
-            if (Regex("^is[A-Z]{1}.*$").matches(fieldName)) {
-                fieldName = fieldName.substring(2)
-            }
-            "is"
-        } else {
-            "get"
-        }
-        return if (Regex("^[a-z]{1}[A-Z]{1}.*").matches(fieldName)) {
-            getterMethodPrefix + fieldName
-        } else {
-            getterMethodPrefix + BaseUtility.capitalize(fieldName)
-        }
-    }
-
-    protected fun makeSetterMethodName(field: Field): String {
-        val setterMethodPrefix = "set"
-        return if (isPrimitiveBooleanType(field) && Regex("^is[A-Z]{1}.*$").matches(field.name)) {
-            setterMethodPrefix + field.name.substring(2)
-        } else if (Regex("^[a-z]{1}[A-Z]{1}.*").matches(field.name)) {
-            setterMethodPrefix + field.name
-        } else {
-            setterMethodPrefix + BaseUtility.capitalize(field.name)
-        }
-    }
-
-    private fun genGetColumnMethod(field: Field): String {
-        val fieldType = if (isCollection(field.type)) {
-            getGenericTypeClass(field)
-        } else {
-            field.type
-        }
-        return genGetColumnMethod(
-            fieldType ?: throw LitePalSupportException("Generic type on ${field.name} is not supported.")
-        )
-    }
-
-    private fun genGetColumnMethod(fieldType: Class<*>): String {
-        val typeName = if (fieldType.isPrimitive) {
-            BaseUtility.capitalize(fieldType.name)
-        } else {
-            fieldType.simpleName
-        }
-        var methodName = "get$typeName"
-        methodName = when (methodName) {
-            "getBoolean", "getInteger" -> "getInt"
-            "getChar", "getCharacter" -> "getString"
-            "getDate" -> "getLong"
-            else -> methodName
-        }
-        return methodName
-    }
-
     private fun getCustomizedColumns(
         columns: Array<String?>?,
-        supportedGenericFields: MutableList<Field>,
+        supportedGenericFields: MutableList<GeneratedGenericFieldMeta>,
         foreignKeyAssociations: List<AssociationsInfo>?
     ): Array<String?>? {
         if (columns != null && columns.isNotEmpty()) {
@@ -778,10 +460,10 @@ abstract class DataHandler : LitePalBase() {
             val supportedGenericFieldNames = ArrayList<String>()
             val columnToRemove = ArrayList<Int>()
             val genericColumnsForQuery = ArrayList<String>()
-            val tempSupportedGenericFields = ArrayList<Field>()
+            val tempSupportedGenericFields = ArrayList<GeneratedGenericFieldMeta>()
 
             for (supportedGenericField in supportedGenericFields) {
-                supportedGenericFieldNames.add(supportedGenericField.name)
+                supportedGenericFieldNames.add(supportedGenericField.propertyName)
             }
 
             for (i in columnList.indices) {
@@ -805,7 +487,7 @@ abstract class DataHandler : LitePalBase() {
             }
 
             for (supportedGenericField in supportedGenericFields) {
-                val fieldName = supportedGenericField.name
+                val fieldName = supportedGenericField.propertyName
                 if (BaseUtility.containsIgnoreCases(genericColumnsForQuery, fieldName)) {
                     tempSupportedGenericFields.add(supportedGenericField)
                 }
@@ -968,7 +650,6 @@ abstract class DataHandler : LitePalBase() {
             if (associatedClassName.isEmpty()) {
                 continue
             }
-            val supportedFields = getSupportedFields(associatedClassName)
             val supportedGenericFields = getSupportedGenericFields(associatedClassName)
             if (associationInfo.getAssociationType() == Const.Model.MANY_TO_MANY) {
                 loadManyToManyAssociationsBatch(
@@ -977,7 +658,6 @@ abstract class DataHandler : LitePalBase() {
                     baseObjById,
                     associationInfo,
                     associatedClassName,
-                    supportedFields,
                     supportedGenericFields
                 )
             } else {
@@ -986,7 +666,6 @@ abstract class DataHandler : LitePalBase() {
                     baseObjById,
                     associationInfo,
                     associatedClassName,
-                    supportedFields,
                     supportedGenericFields
                 )
             }
@@ -998,8 +677,7 @@ abstract class DataHandler : LitePalBase() {
         baseObjById: Map<Long, LitePalSupport>,
         associationInfo: AssociationsInfo,
         associatedClassName: String,
-        supportedFields: List<Field>,
-        supportedGenericFields: List<Field>
+        supportedGenericFields: List<GeneratedGenericFieldMeta>
     ) {
         val foreignKeyColumn = getForeignKeyColumnName(
             DBUtility.getTableNameByClassName(associationInfo.getSelfClassName())
@@ -1008,7 +686,6 @@ abstract class DataHandler : LitePalBase() {
         val associatedTableName = BaseUtility.changeCase(
             DBUtility.getTableNameByClassName(associatedClassName)
         ).orEmpty()
-        val queryInfoCacheSparseArray = SparseArray<QueryInfoCache>()
         @Suppress("UNCHECKED_CAST")
         val generatedCursorMapper = GeneratedRegistryLocator
             .findEntityMeta(associatedClassName)
@@ -1063,12 +740,8 @@ abstract class DataHandler : LitePalBase() {
                             LitePalRuntime.recordGeneratedPathHit("assoc.cursorMapper")
                             generatedCursorMapper.mapFromCursor(modelInstance, cursor)
                         } else {
-                            LitePalRuntime.recordReflectionFallback("assoc.setValueToModel")
-                            setValueToModel(
-                                modelInstance,
-                                supportedFields,
-                                cursor,
-                                queryInfoCacheSparseArray
+                            throw IllegalStateException(
+                                "Generated cursor mapper is REQUIRED for association entity $associatedClassName."
                             )
                         }
                         loadedAssociatedModels.add(modelInstance)
@@ -1087,12 +760,12 @@ abstract class DataHandler : LitePalBase() {
                     addAssociatedModelIntoCollection(
                         baseObj,
                         associationInfo.getAssociateOtherModelFromSelf(),
+                        associationInfo.getAssociateOtherModelCollectionType(),
                         associatedModel
                     )
                 }
             }
         }
-        queryInfoCacheSparseArray.clear()
     }
 
     private fun loadManyToManyAssociationsBatch(
@@ -1101,14 +774,12 @@ abstract class DataHandler : LitePalBase() {
         baseObjById: Map<Long, LitePalSupport>,
         associationInfo: AssociationsInfo,
         associatedClassName: String,
-        supportedFields: List<Field>,
-        supportedGenericFields: List<Field>
+        supportedGenericFields: List<GeneratedGenericFieldMeta>
     ) {
         val associatedClass = resolveAssociationModelClass(associatedClassName) ?: return
         val associatedTableName = DBUtility.getTableNameByClassName(associatedClassName)
         val intermediateTableName = DBUtility.getIntermediateTableName(baseTableName, associatedTableName)
         val baseIdAlias = "_lp_base_id"
-        val queryInfoCacheSparseArray = SparseArray<QueryInfoCache>()
         @Suppress("UNCHECKED_CAST")
         val generatedCursorMapper = GeneratedRegistryLocator
             .findEntityMeta(associatedClassName)
@@ -1153,12 +824,8 @@ abstract class DataHandler : LitePalBase() {
                             LitePalRuntime.recordGeneratedPathHit("m2m.cursorMapper")
                             generatedCursorMapper.mapFromCursor(modelInstance, cursor)
                         } else {
-                            LitePalRuntime.recordReflectionFallback("m2m.setValueToModel")
-                            setValueToModel(
-                                modelInstance,
-                                supportedFields,
-                                cursor,
-                                queryInfoCacheSparseArray
+                            throw IllegalStateException(
+                                "Generated cursor mapper is REQUIRED for many-to-many entity $associatedClassName."
                             )
                         }
                         loadedAssociatedModels.add(modelInstance)
@@ -1174,16 +841,16 @@ abstract class DataHandler : LitePalBase() {
                 addAssociatedModelIntoCollection(
                     baseObj,
                     associationInfo.getAssociateOtherModelFromSelf(),
+                    associationInfo.getAssociateOtherModelCollectionType(),
                     associatedModel
                 )
             }
         }
-        queryInfoCacheSparseArray.clear()
     }
 
     private fun setGenericValuesToModelsBatch(
         baseObjs: List<LitePalSupport>,
-        supportedGenericFields: List<Field>
+        supportedGenericFields: List<GeneratedGenericFieldMeta>
     ) {
         if (baseObjs.isEmpty() || supportedGenericFields.isEmpty()) {
             return
@@ -1208,11 +875,11 @@ abstract class DataHandler : LitePalBase() {
             return
         }
         for (field in supportedGenericFields) {
-            val genericTypeName = getGenericTypeName(field)
-            val tableName = DBUtility.getGenericTableName(baseClassName, field.name)
+            val genericTypeName = field.elementTypeName
+            val tableName = DBUtility.getGenericTableName(baseClassName, field.propertyName)
             val genericValueIdColumnName = DBUtility.getGenericValueIdColumnName(baseClassName)
             if (baseClassName == genericTypeName) {
-                val genericValueColumnName = DBUtility.getM2MSelfRefColumnName(field)
+                val genericValueColumnName = DBUtility.getM2MSelfRefColumnName(field.propertyName)
                 setSelfReferenceGenericValuesBatch(
                     baseModelClass,
                     field,
@@ -1223,13 +890,12 @@ abstract class DataHandler : LitePalBase() {
                     stableBaseIds
                 )
             } else {
-                val genericValueColumnName = DBUtility.convertToValidColumnName(field.name)
+                val genericValueColumnName = DBUtility.convertToValidColumnName(field.propertyName)
                 setCollectionGenericValuesBatch(
                     field,
                     tableName,
                     genericValueColumnName,
                     genericValueIdColumnName,
-                    genGetColumnMethod(field),
                     baseObjById,
                     stableBaseIds
                 )
@@ -1238,11 +904,10 @@ abstract class DataHandler : LitePalBase() {
     }
 
     private fun setCollectionGenericValuesBatch(
-        field: Field,
+        field: GeneratedGenericFieldMeta,
         tableName: String,
         genericValueColumnName: String?,
         genericValueIdColumnName: String,
-        getMethodName: String,
         baseObjById: Map<Long, LitePalSupport>,
         baseIds: List<Long>
     ) {
@@ -1275,13 +940,7 @@ abstract class DataHandler : LitePalBase() {
                     do {
                         val ownerId = cursor.getLong(idColumnIndex)
                         val baseObj = baseObjById[ownerId] ?: continue
-                        setToModelByReflection(
-                            baseObj,
-                            field,
-                            valueColumnIndex,
-                            getMethodName,
-                            cursor
-                        )
+                        setToModelFromCursor(baseObj, field, valueColumnIndex, cursor)
                     } while (cursor.moveToNext())
                 }
             } finally {
@@ -1292,7 +951,7 @@ abstract class DataHandler : LitePalBase() {
 
     private fun setSelfReferenceGenericValuesBatch(
         baseModelClass: Class<out LitePalSupport>,
-        field: Field,
+        field: GeneratedGenericFieldMeta,
         tableName: String,
         genericValueColumnName: String,
         genericValueIdColumnName: String,
@@ -1347,7 +1006,7 @@ abstract class DataHandler : LitePalBase() {
         val referencedModelById = queryModelsByIdsWithoutGeneric(baseModelClass, allReferencedIds)
         for ((ownerId, refIds) in refIdsByOwner) {
             val ownerObj = baseObjById[ownerId] ?: continue
-            val collection = getOrCreateCollection(ownerObj, field)
+            val collection = getOrCreateCollection(ownerObj, field.propertyName, field.collectionType)
             for (refId in refIds) {
                 val referencedModel = referencedModelById[refId] ?: continue
                 collection.add(referencedModel)
@@ -1364,7 +1023,6 @@ abstract class DataHandler : LitePalBase() {
             return emptyMap()
         }
         val supportedFields = getSupportedFields(modelClass.name)
-        val queryInfoCacheSparseArray = SparseArray<QueryInfoCache>()
         @Suppress("UNCHECKED_CAST")
         val generatedCursorMapper = GeneratedRegistryLocator
             .findEntityMeta(modelClass.name)
@@ -1394,8 +1052,9 @@ abstract class DataHandler : LitePalBase() {
                             LitePalRuntime.recordGeneratedPathHit("generic.cursorMapper")
                             generatedCursorMapper.mapFromCursor(modelInstance, cursor)
                         } else {
-                            LitePalRuntime.recordReflectionFallback("generic.setValueToModel")
-                            setValueToModel(modelInstance, supportedFields, cursor, queryInfoCacheSparseArray)
+                            throw IllegalStateException(
+                                "Generated cursor mapper is REQUIRED for generic entity ${modelClass.name}."
+                            )
                         }
                         modelsById[modelInstance.getBaseObjId()] = modelInstance
                     } while (cursor.moveToNext())
@@ -1404,7 +1063,6 @@ abstract class DataHandler : LitePalBase() {
                 cursor?.close()
             }
         }
-        queryInfoCacheSparseArray.clear()
         return modelsById
     }
 
@@ -1414,14 +1072,25 @@ abstract class DataHandler : LitePalBase() {
         if (cached != null) {
             return cached
         }
-        return try {
-            val resolved = Class.forName(className) as Class<out LitePalSupport>
-            ASSOCIATION_MODEL_CLASS_CACHE[className] = resolved
-            resolved
-        } catch (e: ClassNotFoundException) {
+        val instance = try {
+            createInstanceFromClassName(className)
+        } catch (e: Exception) {
             LitePalLog.e(TAG, "Failed to resolve association class $className.", e)
             null
         }
+        val resolved = instance?.javaClass as? Class<out LitePalSupport> ?: return null
+        ASSOCIATION_MODEL_CLASS_CACHE[className] = resolved
+        return resolved
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun createInstanceFromClassName(className: String): LitePalSupport? {
+        val generatedFactory = GeneratedRegistryLocator
+            .findEntityMeta(className)
+            ?.entityFactory as? org.litepal.generated.EntityFactory<LitePalSupport>
+            ?: return null
+        LitePalRuntime.recordGeneratedPathHit("entityFactory.newInstance")
+        return generatedFactory.newInstance()
     }
 
     private fun shouldSkipOneToOneDuplicateOwner(
@@ -1438,19 +1107,20 @@ abstract class DataHandler : LitePalBase() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun getOrCreateCollection(modelInstance: Any, field: Field): MutableCollection<Any?> {
-        var collection = DynamicExecutor.getField(
-            modelInstance,
-            field.name,
-            modelInstance.javaClass
-        ) as MutableCollection<Any?>?
+    private fun getOrCreateCollection(
+        modelInstance: Any,
+        propertyName: String,
+        collectionType: String?
+    ): MutableCollection<Any?> {
+        val baseObj = modelInstance as LitePalSupport
+        var collection = getFieldValue(baseObj, propertyName) as MutableCollection<Any?>?
         if (collection == null) {
-            collection = if (isList(field.type)) {
+            collection = if (isList(collectionType)) {
                 ArrayList()
             } else {
                 HashSet()
             }
-            DynamicExecutor.setField(modelInstance, field.name, collection, modelInstance.javaClass)
+            setFieldValue(baseObj, propertyName, collection)
         }
         return collection
     }
@@ -1458,53 +1128,47 @@ abstract class DataHandler : LitePalBase() {
     @Suppress("UNCHECKED_CAST")
     private fun addAssociatedModelIntoCollection(
         baseObj: LitePalSupport,
-        field: Field?,
+        propertyName: String?,
+        collectionType: String?,
         associatedModel: LitePalSupport
     ) {
-        val collectionField = field ?: return
-        var collection = getFieldValue(baseObj, collectionField) as MutableCollection<LitePalSupport>?
+        val targetProperty = propertyName ?: return
+        var collection = getFieldValue(baseObj, targetProperty) as MutableCollection<LitePalSupport>?
         if (collection == null) {
-            collection = if (isList(collectionField.type)) {
+            collection = if (isList(collectionType)) {
                 ArrayList()
             } else {
                 HashSet()
             }
-            DynamicExecutor.setField(
-                baseObj,
-                collectionField.name,
-                collection,
-                baseObj.javaClass
-            )
+            setFieldValue(baseObj, targetProperty, collection)
         }
         collection.add(associatedModel)
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun setToModelByReflection(
+    private fun setToModelFromCursor(
         modelInstance: Any,
-        field: Field,
+        field: GeneratedGenericFieldMeta,
         columnIndex: Int,
-        getMethodName: String,
         cursor: Cursor
     ) {
         if (cursor.isNull(columnIndex)) {
             return
         }
-        val method: Method = getCursorGetter(cursor.javaClass, getMethodName)
-        var value: Any? = method.invoke(cursor, columnIndex)
-
-        if (field.type == Boolean::class.javaPrimitiveType || field.type == Boolean::class.javaObjectType) {
+        val baseObj = modelInstance as LitePalSupport
+        var value: Any? = readCursorValueForField(cursor, columnIndex, field)
+        if (field.elementTypeName == "java.lang.Boolean") {
             value = when (value.toString()) {
                 "0" -> false
                 "1" -> true
                 else -> value
             }
-        } else if (field.type == Char::class.javaPrimitiveType || field.type == Char::class.javaObjectType) {
+        } else if (field.elementTypeName == "java.lang.Character") {
             value = when (value) {
                 is Char -> value
                 else -> value.toString().firstOrNull() ?: return
             }
-        } else if (field.type == Date::class.java) {
+        } else if (field.elementTypeName == "java.util.Date") {
             val date = value as Long
             value = if (date == Long.MAX_VALUE) {
                 null
@@ -1512,36 +1176,51 @@ abstract class DataHandler : LitePalBase() {
                 Date(date)
             }
         }
-
-        if (isCollection(field.type)) {
-            var collection = DynamicExecutor.getField(
-                modelInstance,
-                field.name,
-                modelInstance.javaClass
-            ) as MutableCollection<Any?>?
-            if (collection == null) {
-                collection = if (isList(field.type)) {
-                    ArrayList()
-                } else {
-                    HashSet()
-                }
-                DynamicExecutor.setField(modelInstance, field.name, collection, modelInstance.javaClass)
-            }
-            val genericTypeName = getGenericTypeName(field)
-            if ("java.lang.String" == genericTypeName) {
-                val annotation = field.getAnnotation(Encrypt::class.java)
-                if (annotation != null) {
-                    value = decryptValue(annotation.algorithm, value)
-                }
-            }
-            collection.add(value)
-        } else {
-            val annotation = field.getAnnotation(Encrypt::class.java)
-            if (annotation != null && "java.lang.String" == field.type.name) {
-                value = decryptValue(annotation.algorithm, value)
-            }
-            DynamicExecutor.setField(modelInstance, field.name, value, modelInstance.javaClass)
+        if (field.elementTypeName == "java.lang.String" && !field.encryptAlgorithm.isNullOrBlank()) {
+            value = decryptValue(field.encryptAlgorithm, value)
         }
+        var collection = getFieldValue(baseObj, field.propertyName) as MutableCollection<Any?>?
+        if (collection == null) {
+            collection = if (isList(field.collectionType)) {
+                ArrayList()
+            } else {
+                HashSet()
+            }
+            setFieldValue(baseObj, field.propertyName, collection)
+        }
+        collection.add(value)
+    }
+
+    private fun readCursorValueForField(
+        cursor: Cursor,
+        columnIndex: Int,
+        field: GeneratedGenericFieldMeta
+    ): Any? {
+        return when (field.elementTypeName) {
+            "java.lang.Boolean" -> cursor.getInt(columnIndex)
+            "java.lang.Character" -> cursor.getString(columnIndex)
+            "java.util.Date" -> cursor.getLong(columnIndex)
+            "java.lang.Byte" -> cursor.getShort(columnIndex).toByte()
+            "java.lang.Short" -> cursor.getShort(columnIndex)
+            "java.lang.Integer" -> cursor.getInt(columnIndex)
+            "java.lang.Long" -> cursor.getLong(columnIndex)
+            "java.lang.Float" -> cursor.getFloat(columnIndex)
+            "java.lang.Double" -> cursor.getDouble(columnIndex)
+            else -> cursor.getString(columnIndex)
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getRequiredPropertyAccessor(className: String): PropertyAccessor<LitePalSupport> {
+        val accessor = GeneratedRegistryLocator
+            .findEntityMeta(className)
+            ?.propertyAccessor as? PropertyAccessor<LitePalSupport>
+        if (accessor != null) {
+            return accessor
+        }
+        throw IllegalStateException(
+            "Generated property accessor is REQUIRED but missing for $className."
+        )
     }
 
     protected fun decryptValue(algorithm: String?, fieldValue: Any?): Any? {
@@ -1554,27 +1233,9 @@ abstract class DataHandler : LitePalBase() {
         return decryptedValue
     }
 
-    class QueryInfoCache {
-        lateinit var getMethodName: String
-        lateinit var field: Field
-    }
-
-    private fun getCursorGetter(cursorClass: Class<*>, methodName: String): Method {
-        val cacheKey = "${cursorClass.name}#$methodName"
-        val cachedMethod = CURSOR_GETTER_METHOD_CACHE[cacheKey]
-        if (cachedMethod != null) {
-            return cachedMethod
-        }
-        val method = cursorClass.getMethod(methodName, Int::class.javaPrimitiveType)
-        CURSOR_GETTER_METHOD_CACHE[cacheKey] = method
-        return method
-    }
-
     companion object {
         const val TAG = "DataHandler"
         private const val QUERY_CHUNK_SIZE = 500
-        private val CONSTRUCTOR_CACHE = ConcurrentHashMap<String, Constructor<*>>()
-        private val CURSOR_GETTER_METHOD_CACHE = ConcurrentHashMap<String, Method>()
         private val ASSOCIATION_MODEL_CLASS_CACHE = ConcurrentHashMap<String, Class<out LitePalSupport>>()
     }
 }
