@@ -59,7 +59,6 @@ abstract class DataHandler : LitePalBase() {
         val dataList = ArrayList<T>()
         var cursor: Cursor? = null
         try {
-            val supportedFields = getSupportedFields(modelClass.name)
             val supportedGenericFields = getSupportedGenericFields(modelClass.name).toMutableList()
             val customizedColumns = getCustomizedColumns(columns, supportedGenericFields, foreignKeyAssociations)
             val validColumns = DBUtility.convertSelectClauseToValidNames(customizedColumns as Array<String>?)
@@ -911,6 +910,11 @@ abstract class DataHandler : LitePalBase() {
         baseObjById: Map<Long, LitePalSupport>,
         baseIds: List<Long>
     ) {
+        val normalizedValueColumnName = BaseUtility.changeCase(genericValueColumnName).orEmpty()
+        if (normalizedValueColumnName.isEmpty()) {
+            return
+        }
+        val projection = arrayOf(genericValueIdColumnName, normalizedValueColumnName)
         for (idChunk in baseIds.chunked(QUERY_CHUNK_SIZE)) {
             if (idChunk.isEmpty()) {
                 continue
@@ -922,7 +926,7 @@ abstract class DataHandler : LitePalBase() {
             try {
                 cursor = mDatabase.query(
                     tableName,
-                    null,
+                    projection,
                     whereClause,
                     whereArgs,
                     null,
@@ -931,9 +935,7 @@ abstract class DataHandler : LitePalBase() {
                 )
                 if (cursor.moveToFirst()) {
                     val idColumnIndex = cursor.getColumnIndex(genericValueIdColumnName)
-                    val valueColumnIndex = cursor.getColumnIndex(
-                        BaseUtility.changeCase(genericValueColumnName)
-                    )
+                    val valueColumnIndex = cursor.getColumnIndex(normalizedValueColumnName)
                     if (idColumnIndex == -1 || valueColumnIndex == -1) {
                         continue
                     }
@@ -958,6 +960,11 @@ abstract class DataHandler : LitePalBase() {
         baseObjById: Map<Long, LitePalSupport>,
         baseIds: List<Long>
     ) {
+        val normalizedValueColumnName = BaseUtility.changeCase(genericValueColumnName).orEmpty()
+        if (normalizedValueColumnName.isEmpty()) {
+            return
+        }
+        val projection = arrayOf(genericValueIdColumnName, normalizedValueColumnName)
         val refIdsByOwner = HashMap<Long, MutableList<Long>>()
         val allReferencedIds = LinkedHashSet<Long>()
         for (idChunk in baseIds.chunked(QUERY_CHUNK_SIZE)) {
@@ -971,7 +978,7 @@ abstract class DataHandler : LitePalBase() {
             try {
                 cursor = mDatabase.query(
                     tableName,
-                    null,
+                    projection,
                     whereClause,
                     whereArgs,
                     null,
@@ -980,9 +987,7 @@ abstract class DataHandler : LitePalBase() {
                 )
                 if (cursor.moveToFirst()) {
                     val ownerIdColumnIndex = cursor.getColumnIndex(genericValueIdColumnName)
-                    val valueIdColumnIndex = cursor.getColumnIndex(
-                        BaseUtility.changeCase(genericValueColumnName)
-                    )
+                    val valueIdColumnIndex = cursor.getColumnIndex(normalizedValueColumnName)
                     if (ownerIdColumnIndex == -1 || valueIdColumnIndex == -1) {
                         continue
                     }
@@ -1022,7 +1027,6 @@ abstract class DataHandler : LitePalBase() {
         if (ids.isEmpty()) {
             return emptyMap()
         }
-        val supportedFields = getSupportedFields(modelClass.name)
         @Suppress("UNCHECKED_CAST")
         val generatedCursorMapper = GeneratedRegistryLocator
             .findEntityMeta(modelClass.name)

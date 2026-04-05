@@ -70,6 +70,7 @@ object Operator {
     private val preloadEpochInFlight = ConcurrentHashMap.newKeySet<Long>()
     private val preloadFuturesByEpoch = ConcurrentHashMap<Long, Future<*>>()
     private val schemaValidatedEpoch = AtomicLong(Long.MIN_VALUE)
+    private val schemaValidationLock = Any()
     private val preloadExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "LitePal-DB-Preload").apply {
             isDaemon = true
@@ -937,16 +938,16 @@ object Operator {
 
     @JvmStatic
     internal fun validateSchemaIfNeeded(database: SQLiteDatabase, epoch: Long) {
-        val currentValidatedEpoch = schemaValidatedEpoch.get()
-        if (currentValidatedEpoch == epoch) {
+        if (schemaValidatedEpoch.get() == epoch) {
             return
         }
-        if (!schemaValidatedEpoch.compareAndSet(currentValidatedEpoch, epoch)) {
+        synchronized(schemaValidationLock) {
             if (schemaValidatedEpoch.get() == epoch) {
                 return
             }
+            SchemaValidationGate.validate(database)
+            schemaValidatedEpoch.set(epoch)
         }
-        SchemaValidationGate.validate(database)
     }
 }
 

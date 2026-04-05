@@ -141,6 +141,7 @@ object Connector {
                 storage = litePalAttr.storage,
                 createDir = true
             )
+            ensureDatabaseParentDir(dbPath)
             return LitePalOpenHelper(dbPath, litePalAttr.version).also { helper ->
                 litePalHelper = helper
             }
@@ -219,6 +220,18 @@ object Connector {
             baseDir.mkdirs()
         }
         return File(baseDir, dbName).absolutePath
+    }
+
+    private fun ensureDatabaseParentDir(dbPath: String) {
+        val dbFile = if (File(dbPath).isAbsolute) {
+            File(dbPath)
+        } else {
+            LitePalApplication.getContext().getDatabasePath(dbPath)
+        }
+        val parentDir = dbFile.parentFile ?: return
+        if (!parentDir.exists()) {
+            parentDir.mkdirs()
+        }
     }
 
     @JvmStatic
