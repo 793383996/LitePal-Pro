@@ -20,6 +20,7 @@ rootProject.name = "LitePal-Pro"
 
 include(
         ":sample",
+        ":sample-test",
         ":core",
         ":compiler-common",
         ":compiler-ksp",

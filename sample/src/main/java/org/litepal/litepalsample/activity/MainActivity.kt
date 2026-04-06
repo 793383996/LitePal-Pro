@@ -23,19 +23,24 @@ import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.litepal.litepalsample.ui.LitePalSampleApp
-import org.litepal.litepalsample.ui.SampleViewModel
+import org.litepal.litepalsample.ui.SampleDataViewModel
+import org.litepal.litepalsample.ui.TestDashboardViewModel
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: SampleViewModel by viewModels()
+    private val dataViewModel: SampleDataViewModel by viewModels()
+    private val testDashboardViewModel: TestDashboardViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lifecycleScope.launch {
-            viewModel.startAutoFullRunIfNeeded()
+            testDashboardViewModel.startAutoFullRunIfNeeded()
         }
         // UI 核心流程（UI core flow）：绑定 Compose App 与 ViewModel 作为状态单一来源。
         setContent {
-            LitePalSampleApp(viewModel = viewModel)
+            LitePalSampleApp(
+                dataViewModel = dataViewModel,
+                testDashboardViewModel = testDashboardViewModel
+            )
         }
     }
 }

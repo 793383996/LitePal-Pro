@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.library'
+    id 'com.google.devtools.ksp'
+}
+
+android {
+    namespace 'org.litepal.sampletest'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 24
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        testInstrumentationRunnerArgument 'class', 'org.litepal.sampletest.suite.SampleTestAllSuites'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        resources {
+            pickFirsts += [
+                'org/litepal/generated/schema-v*.json',
+                'org/litepal/generated/schema-hash.txt',
+                'org/litepal/generated/migration-diff-report.txt'
+            ]
+        }
+    }
+}
+
+dependencies {
+    implementation project(':core')
+    androidTestImplementation project(':sample')
+    kspAndroidTest project(':compiler-ksp')
+
+    androidTestImplementation 'androidx.test:core:1.6.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
+    androidTestImplementation 'androidx.lifecycle:lifecycle-runtime:2.8.7'
+}
+
+tasks.register('verifyGeneratedRegistry') {
+    dependsOn 'kspDebugAndroidTestKotlin'
+    doLast {
+        def generatedRegistry = file("$buildDir/generated/ksp/debugAndroidTest/kotlin/org/litepal/generated/LitePalGeneratedRegistryImpl.kt")
+        if (!generatedRegistry.exists()) {
+            throw new GradleException("Missing LitePal generated registry for sample-test AndroidTest.")
+        }
+    }
+}
+
+tasks.matching { it.name == 'assembleDebug' }.configureEach {
+    dependsOn(tasks.named('verifyGeneratedRegistry'))
+}

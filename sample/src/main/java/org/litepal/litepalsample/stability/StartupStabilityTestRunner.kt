@@ -1,11 +1,7 @@
 package org.litepal.litepalsample.stability
 
-import android.content.ContentValues
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
-import android.widget.Toast
+import android.content.ContentValues
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -39,7 +35,6 @@ import kotlin.math.roundToLong
 
 object StartupStabilityTestRunner {
 
-    private const val TAG = "LitePalStartupStability"
     private val started = AtomicBoolean(false)
     private val cancellationSignals = ConcurrentHashMap<String, AtomicBoolean>()
 
@@ -226,16 +221,16 @@ object StartupStabilityTestRunner {
         val appContext = context.applicationContext
         val runId = UUID.randomUUID().toString()
         val cancellationSignal = AtomicBoolean(false)
+        val logger = StartupStabilityEventLogger(config)
         Thread(
             {
-                val suite = StartupStabilitySuite(
+                val metric = StartupStabilityRunnerCore(
                     config = config,
                     runId = runId,
                     cancellationSignal = cancellationSignal
-                )
-                val metric = suite.runAll()
-                logRun(metric, config)
-                showFailureToastIfNeeded(appContext, metric, config)
+                ).runAll()
+                logger.logRun(metric)
+                logger.showFailureToastIfNeeded(appContext, metric)
             },
             "litepal-startup-stability"
         ).start()
@@ -247,17 +242,17 @@ object StartupStabilityTestRunner {
     ): TestRunReport {
         val runId = UUID.randomUUID().toString()
         val cancellationSignal = AtomicBoolean(false)
+        val logger = StartupStabilityEventLogger(config)
         cancellationSignals[runId] = cancellationSignal
         return try {
             withContext(Dispatchers.IO) {
-                val suite = StartupStabilitySuite(
+                val metric = StartupStabilityRunnerCore(
                     config = config,
                     runId = runId,
                     cancellationSignal = cancellationSignal,
                     observer = observer
-                )
-                val metric = suite.runAll()
-                logRun(metric, config)
+                ).runAll()
+                logger.logRun(metric)
                 val report = metric.toReport()
                 if (metric.cancelled) {
                     observer(
@@ -292,79 +287,6 @@ object StartupStabilityTestRunner {
 
     fun cancelCurrentRun(runId: String) {
         cancellationSignals[runId]?.set(true)
-    }
-
-    private fun showFailureToastIfNeeded(context: Context, metric: RunMetric, config: StabilityConfig) {
-        if (!config.showFailureToast || metric.failedCount == 0) {
-            return
-        }
-        val firstFailed = metric.failures.firstOrNull()?.caseName ?: "unknown_case"
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(
-                context,
-                "LitePal stability failed: ${metric.failedCount}, first=$firstFailed",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    private fun logRun(metric: RunMetric, config: StabilityConfig) {
-        Log.i(
-            TAG,
-            "RUN_START|runId=${metric.runId}|timestamp=${metric.startEpochMs}|buildType=${metric.buildType}|thread=${Thread.currentThread().name}|stressLevel=${metric.stressLevel}"
-        )
-
-        for (caseMetric in metric.caseMetrics) {
-            val checkpoints = caseMetric.checkpoints.joinToString(",") { "${it.name}:${it.costMs}ms" }
-            val base = StringBuilder()
-                .append("CASE_RESULT")
-                .append("|runId=").append(metric.runId)
-                .append("|caseName=").append(caseMetric.caseName)
-                .append("|success=").append(caseMetric.success)
-                .append("|costMs=").append(caseMetric.costMs)
-                .append("|recordsWritten=").append(caseMetric.recordsWritten)
-                .append("|recordsUpdated=").append(caseMetric.recordsUpdated)
-                .append("|recordsDeleted=").append(caseMetric.recordsDeleted)
-                .append("|assertions=").append(caseMetric.assertions)
-                .append("|checkpoints=").append(sanitize(checkpoints))
-
-            if (caseMetric.error != null) {
-                base.append("|error=").append(sanitize(caseMetric.error))
-                Log.e(TAG, base.toString())
-            } else {
-                Log.i(TAG, base.toString())
-            }
-        }
-
-        Log.i(
-            TAG,
-            "RUN_SUMMARY|runId=${metric.runId}|totalCases=${metric.totalCases}|passed=${metric.passedCount}|failed=${metric.failedCount}|cancelled=${metric.cancelled}|pending=${metric.pendingCaseNames.size}|totalMs=${metric.totalMs}|avgMs=${metric.avgMs}|minMs=${metric.minMs}|maxMs=${metric.maxMs}|p50=${metric.p50Ms}|p95=${metric.p95Ms}"
-        )
-
-        val topSlow = metric.caseMetrics
-            .sortedByDescending { it.costMs }
-            .take(config.maxSlowCaseTop.coerceAtLeast(1))
-        for ((index, item) in topSlow.withIndex()) {
-            Log.i(TAG, "SLOW_TOP|runId=${metric.runId}|rank=${index + 1}|caseName=${item.caseName}|costMs=${item.costMs}")
-        }
-
-        if (metric.failures.isEmpty()) {
-            Log.i(TAG, "FAILURES|runId=${metric.runId}|count=0")
-        } else {
-            Log.e(TAG, "FAILURES|runId=${metric.runId}|count=${metric.failures.size}")
-            for (failure in metric.failures) {
-                Log.e(
-                    TAG,
-                    "FAILURE_DETAIL|runId=${metric.runId}|caseName=${failure.caseName}|message=${sanitize(failure.message)}|stackHead=${sanitize(failure.stackHead)}"
-                )
-            }
-        }
-
-        Log.i(TAG, "RUN_END|runId=${metric.runId}|timestamp=${metric.endEpochMs}|totalMs=${metric.totalMs}")
-    }
-
-    private fun sanitize(text: String): String {
-        return text.replace("|", "/").replace('\n', ' ').replace('\r', ' ')
     }
 
     private fun toErrorDetail(throwable: Throwable): TestErrorDetail {
@@ -435,7 +357,7 @@ object StartupStabilityTestRunner {
         )
     }
 
-    private class StartupStabilitySuite(
+    internal class StartupStabilitySuite(
         private val config: StabilityConfig,
         private val runId: String,
         private val cancellationSignal: AtomicBoolean,
@@ -715,17 +637,17 @@ object StartupStabilityTestRunner {
 
         private fun buildCases(): List<StabilityCase> {
             return listOf(
-                LambdaCase("save_association_basic", this::caseSaveAssociationBasic),
-                LambdaCase("query_aggregate_basic", this::caseQueryAggregateBasic),
-                LambdaCase("update_delete_basic", this::caseUpdateDeleteBasic),
-                LambdaCase("transaction_commit_basic", this::caseTransactionCommitBasic),
-                LambdaCase("transaction_rollback_basic", this::caseTransactionRollbackBasic),
-                LambdaCase("stress_bulk_insert_query", this::caseStressBulkInsertQuery),
-                LambdaCase("stress_bulk_update_delete", this::caseStressBulkUpdateDelete),
-                LambdaCase("stress_association_high_volume", this::caseStressAssociationHighVolume),
-                LambdaCase("stress_transaction_repeat", this::caseStressTransactionRepeat),
-                LambdaCase("stress_unique_conflict_rollback", this::caseStressUniqueConflictRollback),
-                LambdaCase("stress_concurrent_read_write", this::caseStressConcurrentReadWrite)
+                LambdaCase(StartupStabilityCaseCatalog.SAVE_ASSOCIATION_BASIC, this::caseSaveAssociationBasic),
+                LambdaCase(StartupStabilityCaseCatalog.QUERY_AGGREGATE_BASIC, this::caseQueryAggregateBasic),
+                LambdaCase(StartupStabilityCaseCatalog.UPDATE_DELETE_BASIC, this::caseUpdateDeleteBasic),
+                LambdaCase(StartupStabilityCaseCatalog.TRANSACTION_COMMIT_BASIC, this::caseTransactionCommitBasic),
+                LambdaCase(StartupStabilityCaseCatalog.TRANSACTION_ROLLBACK_BASIC, this::caseTransactionRollbackBasic),
+                LambdaCase(StartupStabilityCaseCatalog.STRESS_BULK_INSERT_QUERY, this::caseStressBulkInsertQuery),
+                LambdaCase(StartupStabilityCaseCatalog.STRESS_BULK_UPDATE_DELETE, this::caseStressBulkUpdateDelete),
+                LambdaCase(StartupStabilityCaseCatalog.STRESS_ASSOCIATION_HIGH_VOLUME, this::caseStressAssociationHighVolume),
+                LambdaCase(StartupStabilityCaseCatalog.STRESS_TRANSACTION_REPEAT, this::caseStressTransactionRepeat),
+                LambdaCase(StartupStabilityCaseCatalog.STRESS_UNIQUE_CONFLICT_ROLLBACK, this::caseStressUniqueConflictRollback),
+                LambdaCase(StartupStabilityCaseCatalog.STRESS_CONCURRENT_READ_WRITE, this::caseStressConcurrentReadWrite)
             )
         }
 

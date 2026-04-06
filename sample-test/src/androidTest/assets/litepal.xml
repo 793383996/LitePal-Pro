@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<litepal>
+    <dbname value="sample_test" />
+    <version value="1" />
+    <list>
+        <mapping class="org.litepal.litepalsample.model.Album" />
+        <mapping class="org.litepal.litepalsample.model.Song" />
+        <mapping class="org.litepal.litepalsample.model.Singer" />
+
+        <mapping class="org.litepal.sampletest.model.Classroom" />
+        <mapping class="org.litepal.sampletest.model.Teacher" />
+        <mapping class="org.litepal.sampletest.model.IdCard" />
+        <mapping class="org.litepal.sampletest.model.Student" />
+        <mapping class="org.litepal.sampletest.model.Cellphone" />
+        <mapping class="org.litepal.sampletest.model.Computer" />
+        <mapping class="org.litepal.sampletest.model.Book" />
+        <mapping class="org.litepal.sampletest.model.Product" />
+        <mapping class="org.litepal.sampletest.model.Headset" />
+        <mapping class="org.litepal.sampletest.model.WeChatMessage" />
+        <mapping class="org.litepal.sampletest.model.WeiboMessage" />
+    </list>
+    <storage value="internal" />
+</litepal>
