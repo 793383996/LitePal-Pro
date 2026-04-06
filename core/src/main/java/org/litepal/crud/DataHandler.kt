@@ -165,13 +165,27 @@ abstract class DataHandler : LitePalBase() {
     @Suppress("UNCHECKED_CAST")
     private fun <T> readMathQueryValue(cursor: Cursor, type: Class<T>): T {
         return when {
-            type == Int::class.java || type == Integer.TYPE -> cursor.getInt(0) as T
-            type == Long::class.java || type == java.lang.Long.TYPE -> cursor.getLong(0) as T
-            type == Short::class.java || type == java.lang.Short.TYPE -> cursor.getShort(0) as T
-            type == Float::class.java || type == java.lang.Float.TYPE -> cursor.getFloat(0) as T
-            type == Double::class.java || type == java.lang.Double.TYPE -> cursor.getDouble(0) as T
-            type == Boolean::class.java || type == java.lang.Boolean.TYPE -> (cursor.getInt(0) == 1) as T
-            type == Char::class.java || type == java.lang.Character.TYPE -> {
+            type == Int::class.java ||
+                type == Integer.TYPE ||
+                type == java.lang.Integer::class.java -> cursor.getInt(0) as T
+            type == Long::class.java ||
+                type == java.lang.Long.TYPE ||
+                type == java.lang.Long::class.java -> cursor.getLong(0) as T
+            type == Short::class.java ||
+                type == java.lang.Short.TYPE ||
+                type == java.lang.Short::class.java -> cursor.getShort(0) as T
+            type == Float::class.java ||
+                type == java.lang.Float.TYPE ||
+                type == java.lang.Float::class.java -> cursor.getFloat(0) as T
+            type == Double::class.java ||
+                type == java.lang.Double.TYPE ||
+                type == java.lang.Double::class.java -> cursor.getDouble(0) as T
+            type == Boolean::class.java ||
+                type == java.lang.Boolean.TYPE ||
+                type == java.lang.Boolean::class.java -> (cursor.getInt(0) == 1) as T
+            type == Char::class.java ||
+                type == java.lang.Character.TYPE ||
+                type == java.lang.Character::class.java -> {
                 val value = cursor.getString(0)
                 (value?.firstOrNull() ?: '\u0000') as T
             }

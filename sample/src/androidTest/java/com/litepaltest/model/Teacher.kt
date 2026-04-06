@@ -1,6 +1,7 @@
 package com.litepaltest.model
 
 import org.litepal.crud.LitePalSupport
+import kotlin.jvm.JvmName
 
 class Teacher : LitePalSupport() {
     var id: Int = 0
@@ -11,6 +12,8 @@ class Teacher : LitePalSupport() {
     var idCard: IdCard? = null
     var students: MutableList<Student> = mutableListOf()
 
+    @get:JvmName("isSexCompat")
+    @set:JvmName("setIsSexCompat")
     var isSex: Boolean
         get() = sex
         set(value) {

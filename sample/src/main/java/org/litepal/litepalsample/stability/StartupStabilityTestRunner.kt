@@ -1,11 +1,13 @@
 package org.litepal.litepalsample.stability
 
+import android.content.ContentValues
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import org.litepal.LitePal
+import org.litepal.LitePalRuntime
 import org.litepal.extension.runInTransaction
 import org.litepal.extension.saveAll
 import org.litepal.litepalsample.BuildConfig
@@ -514,7 +516,9 @@ object StartupStabilityTestRunner {
                     isMale = false
                 }
                 requireCase(metric, singer.save(), "rollback singer save failed")
-                throw IllegalStateException("force rollback for startup stability test")
+                // In strict mode, throwing from transaction block will be escalated by runtime policy.
+                // Use explicit `false` to verify rollback path deterministically across policies.
+                false
             }
             requireCase(metric, !rollbackResult, "transaction rollback should return false")
             val count = LitePal.where("name = ?", rollbackName).count(Singer::class.java)
@@ -616,10 +620,17 @@ object StartupStabilityTestRunner {
             requireCase(metric, singers.saveAll(), "stress update/delete saveAll failed")
             metric.recordsWritten += total
 
-            val updater = Singer().apply {
-                age = 66
+            val values = ContentValues().apply {
+                put("age", 66)
             }
-            val rowsUpdated = updater.updateAll("name like ? and age = ?", "${prefix}_u_%", "10")
+            // Use ContentValues update to avoid overriding unrelated fields (name/isMale) to defaults.
+            val rowsUpdated = LitePal.updateAll(
+                Singer::class.java,
+                values,
+                "name like ? and age = ?",
+                "${prefix}_u_%",
+                "10"
+            )
             metric.recordsUpdated += rowsUpdated
             requireCase(metric, rowsUpdated == toUpdate, "expected update rows $toUpdate but got $rowsUpdated")
 
@@ -749,7 +760,11 @@ object StartupStabilityTestRunner {
                     duration = "03:33"
                 }
             }
-            val saveResult = timedStep(metric, "save_conflict_batch") { songs.saveAll() }
+            val saveResult = timedStep(metric, "save_conflict_batch") {
+                LitePalRuntime.withSilentErrorLog {
+                    runCatching { songs.saveAll() }.getOrDefault(false)
+                }
+            }
             metric.recordsWritten += songs.size
             requireCase(metric, !saveResult, "unique conflict should fail saveAll")
             val songsCount = LitePal.where("name like ?", "${prefix}_song_%").count(Song::class.java)

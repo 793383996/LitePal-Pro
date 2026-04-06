@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // UI 核心流程（UI core flow）：绑定 Compose App 与 ViewModel 作为状态单一来源。
         setContent {
             val viewModel: SampleViewModel = viewModel()
             LitePalSampleApp(viewModel = viewModel)

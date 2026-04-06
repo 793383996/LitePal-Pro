@@ -11,6 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.litepal.GeneratedMetadataMode
 import org.litepal.LitePal
+import org.litepal.LitePalDB
 import org.litepal.litepalsample.model.Album
 import org.litepal.litepalsample.model.Singer
 import org.litepal.litepalsample.model.Song
@@ -20,13 +21,20 @@ import java.util.Locale
 @RunWith(AndroidJUnit4::class)
 class SampleCrudIntegrationInstrumentationTest {
 
+    private lateinit var testDbName: String
+
     @Before
     fun setUp() {
+        testDbName = "sample_crud_it_${System.currentTimeMillis()}"
+        LitePal.use(LitePalDB.fromDefault(testDbName))
+        LitePal.getDatabase()
         LitePal.resetRuntimeMetrics()
     }
 
     @After
     fun tearDown() {
+        LitePal.useDefault()
+        LitePal.deleteDatabase(testDbName)
         LitePal.resetRuntimeMetrics()
     }
 
@@ -84,6 +92,36 @@ class SampleCrudIntegrationInstrumentationTest {
             if (firstAlbum.singer != null) {
                 assertTrue(firstAlbum.singer!!.id >= 0)
             }
+        }
+    }
+
+    @Test
+    fun aggregateApi_shouldSupportBoxedNumberTypes() {
+        val prefix = "__sample_boxed_aggregate_${System.currentTimeMillis()}"
+        try {
+            Singer().apply {
+                name = "${prefix}_1"
+                age = 20
+                isMale = true
+            }.save()
+            Singer().apply {
+                name = "${prefix}_2"
+                age = 30
+                isMale = false
+            }.save()
+
+            val where = LitePal.where("name like ?", "${prefix}_%")
+            val max = where.max(Singer::class.java, "age", Int::class.javaObjectType)
+            val min = where.min(Singer::class.java, "age", Int::class.javaObjectType)
+            val sum = where.sum(Singer::class.java, "age", Int::class.javaObjectType)
+            val avg = where.average(Singer::class.java, "age")
+
+            assertEquals(30, max.toInt())
+            assertEquals(20, min.toInt())
+            assertEquals(50, sum.toInt())
+            assertTrue(avg in 24.99..25.01)
+        } finally {
+            LitePal.deleteAll(Singer::class.java, "name like ?", "${prefix}_%")
         }
     }
 }

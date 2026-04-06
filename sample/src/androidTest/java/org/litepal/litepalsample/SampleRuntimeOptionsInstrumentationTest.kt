@@ -7,8 +7,12 @@ import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.litepal.GeneratedMetadataMode
+import org.litepal.LitePalCryptoPolicy
+import org.litepal.LitePalErrorPolicy
 import org.litepal.LitePal
+import org.litepal.LitePalRuntime
 import org.litepal.MainThreadViolationPolicy
+import org.litepal.SchemaValidationMode
 
 @RunWith(AndroidJUnit4::class)
 class SampleRuntimeOptionsInstrumentationTest {
@@ -20,7 +24,10 @@ class SampleRuntimeOptionsInstrumentationTest {
         assertFalse(options.allowMainThreadAccess)
         assertEquals(MainThreadViolationPolicy.THROW, options.mainThreadViolationPolicy)
         assertEquals(GeneratedMetadataMode.REQUIRED, options.generatedMetadataMode)
+        assertEquals(SchemaValidationMode.STRICT, options.schemaValidationMode)
         assertNotNull(options.queryExecutor)
         assertNotNull(options.transactionExecutor)
+        assertEquals(LitePalErrorPolicy.STRICT, LitePalRuntime.getErrorPolicy())
+        assertEquals(LitePalCryptoPolicy.V2_WRITE_DUAL_READ, LitePalRuntime.getCryptoPolicy())
     }
 }
