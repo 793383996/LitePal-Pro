@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,7 @@ class TestDashboardViewModel : ViewModel() {
     private var caseElapsedTickerJob: Job? = null
     private var activeTestRunId: String? = null
     private val activeCaseMap = LinkedHashMap<String, TestCaseUiItem>()
+    private val stateLock = Any()
 
     fun startAutoFullRunIfNeeded() {
         if (autoRunTriggered) {
@@ -56,14 +58,16 @@ class TestDashboardViewModel : ViewModel() {
                     errorSummary = throwable.message,
                     errorStack = throwable.stackTraceToString()
                 )
-                _uiState.update { current ->
-                    current.copy(
-                        runStatus = TestRunUiStatus.CRASHED,
-                        runId = runId,
-                        lastFailure = crashedCase,
-                        currentCaseName = null,
-                        message = "Full suite crashed: ${throwable.message.orEmpty()}"
-                    )
+                synchronized(stateLock) {
+                    _uiState.update { current ->
+                        current.copy(
+                            runStatus = TestRunUiStatus.CRASHED,
+                            runId = runId,
+                            lastFailure = crashedCase,
+                            currentCaseName = null,
+                            message = "Full suite crashed: ${throwable.message.orEmpty()}"
+                        )
+                    }
                 }
             }
         }
@@ -99,134 +103,136 @@ class TestDashboardViewModel : ViewModel() {
     }
 
     private fun handleTestRunEvent(event: StartupStabilityTestRunner.TestRunEvent) {
-        when (event) {
-            is StartupStabilityTestRunner.TestRunEvent.RunStarted -> {
-                stopCaseElapsedTicker()
-                activeTestRunId = event.trace.runId
-                activeCaseMap.clear()
-                event.pendingCaseNames.forEach { caseName ->
-                    activeCaseMap[caseName] = TestCaseUiItem(
-                        id = caseName,
-                        name = caseName,
-                        status = TestCaseUiStatus.PENDING
-                    )
+        synchronized(stateLock) {
+            when (event) {
+                is StartupStabilityTestRunner.TestRunEvent.RunStarted -> {
+                    stopCaseElapsedTicker()
+                    activeTestRunId = event.trace.runId
+                    activeCaseMap.clear()
+                    event.pendingCaseNames.forEach { caseName ->
+                        activeCaseMap[caseName] = TestCaseUiItem(
+                            id = caseName,
+                            name = caseName,
+                            status = TestCaseUiStatus.PENDING
+                        )
+                    }
+                    _uiState.update { current ->
+                        current
+                            .copy(
+                                runStatus = TestRunUiStatus.RUNNING,
+                                runId = event.trace.runId,
+                                stressLevel = event.stressLevel.name,
+                                totalCases = event.totalCases,
+                                currentCaseName = null,
+                                currentCaseElapsedMs = 0L
+                            )
+                            .mergeFromCaseMap(activeCaseMap)
+                    }
                 }
-                _uiState.update { current ->
-                    current
-                        .copy(
-                            runStatus = TestRunUiStatus.RUNNING,
+
+                is StartupStabilityTestRunner.TestRunEvent.CaseStarted -> {
+                    val startedAt = event.trace.timestampEpochMs
+                    val caseId = event.trace.caseId ?: event.caseName
+                    val existing = activeCaseMap[caseId]
+                    activeCaseMap[caseId] = (existing ?: TestCaseUiItem(
+                        id = caseId,
+                        name = event.caseName
+                    )).copy(
+                        status = TestCaseUiStatus.RUNNING,
+                        threadName = event.trace.threadName,
+                        startEpochMs = startedAt,
+                        endEpochMs = null,
+                        costMs = 0L,
+                        errorSummary = null,
+                        errorStack = null
+                    )
+                    _uiState.update { current ->
+                        current
+                            .copy(
+                                currentCaseName = event.caseName,
+                                currentCaseElapsedMs = 0L
+                            )
+                            .mergeFromCaseMap(activeCaseMap)
+                    }
+                    ensureCaseElapsedTicker()
+                }
+
+                is StartupStabilityTestRunner.TestRunEvent.Checkpoint -> {
+                    val caseId = event.trace.caseId ?: return
+                    val existing = activeCaseMap[caseId] ?: return
+                    val nextCost = existing.startEpochMs?.let { start ->
+                        (event.trace.timestampEpochMs - start).coerceAtLeast(existing.costMs)
+                    } ?: (existing.costMs + event.costMs)
+                    activeCaseMap[caseId] = existing.copy(costMs = nextCost)
+                    _uiState.update { current ->
+                        current
+                            .copy(
+                                currentCaseName = existing.name,
+                                currentCaseElapsedMs = nextCost
+                            )
+                            .mergeFromCaseMap(activeCaseMap)
+                    }
+                }
+
+                is StartupStabilityTestRunner.TestRunEvent.CasePassed -> {
+                    stopCaseElapsedTicker()
+                    val caseItem = event.result.toCaseUiItem()
+                    activeCaseMap[event.result.caseId] = caseItem
+                    _uiState.update { current ->
+                        current
+                            .copy(
+                                currentCaseName = null,
+                                currentCaseElapsedMs = 0L
+                            )
+                            .mergeFromCaseMap(activeCaseMap)
+                    }
+                }
+
+                is StartupStabilityTestRunner.TestRunEvent.CaseFailed -> {
+                    stopCaseElapsedTicker()
+                    val caseItem = event.result.toCaseUiItem()
+                    activeCaseMap[event.result.caseId] = caseItem
+                    _uiState.update { current ->
+                        current
+                            .copy(
+                                currentCaseName = null,
+                                currentCaseElapsedMs = 0L,
+                                lastFailure = caseItem
+                            )
+                            .mergeFromCaseMap(activeCaseMap)
+                    }
+                }
+
+                is StartupStabilityTestRunner.TestRunEvent.RunFinished -> {
+                    stopCaseElapsedTicker()
+                    finalizeRun(event.report, TestRunUiStatus.FINISHED)
+                }
+
+                is StartupStabilityTestRunner.TestRunEvent.RunCancelled -> {
+                    stopCaseElapsedTicker()
+                    finalizeRun(event.report, TestRunUiStatus.CANCELLED)
+                }
+
+                is StartupStabilityTestRunner.TestRunEvent.RunCrashed -> {
+                    stopCaseElapsedTicker()
+                    val crashItem = TestCaseUiItem(
+                        id = "run_crashed",
+                        name = "run_crashed",
+                        status = TestCaseUiStatus.FAILED,
+                        errorSummary = event.error.summary,
+                        errorStack = event.error.stackTrace
+                    )
+                    _uiState.update { current ->
+                        current.copy(
+                            runStatus = TestRunUiStatus.CRASHED,
                             runId = event.trace.runId,
-                            stressLevel = event.stressLevel.name,
-                            totalCases = event.totalCases,
                             currentCaseName = null,
-                            currentCaseElapsedMs = 0L
+                            lastFailure = crashItem,
+                            message = "Full suite crashed: ${event.error.summary}"
                         )
-                        .mergeFromCaseMap(activeCaseMap)
+                    }
+                    activeTestRunId = null
                 }
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.CaseStarted -> {
-                val startedAt = event.trace.timestampEpochMs
-                val caseId = event.trace.caseId ?: event.caseName
-                val existing = activeCaseMap[event.trace.caseId]
-                activeCaseMap[caseId] = (existing ?: TestCaseUiItem(
-                    id = caseId,
-                    name = event.caseName
-                )).copy(
-                    status = TestCaseUiStatus.RUNNING,
-                    threadName = event.trace.threadName,
-                    startEpochMs = startedAt,
-                    endEpochMs = null,
-                    costMs = 0L,
-                    errorSummary = null,
-                    errorStack = null
-                )
-                _uiState.update { current ->
-                    current
-                        .copy(
-                            currentCaseName = event.caseName,
-                            currentCaseElapsedMs = 0L
-                        )
-                        .mergeFromCaseMap(activeCaseMap)
-                }
-                ensureCaseElapsedTicker()
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.Checkpoint -> {
-                val caseId = event.trace.caseId ?: return
-                val existing = activeCaseMap[caseId] ?: return
-                val nextCost = existing.startEpochMs?.let { start ->
-                    (event.trace.timestampEpochMs - start).coerceAtLeast(existing.costMs)
-                } ?: (existing.costMs + event.costMs)
-                activeCaseMap[caseId] = existing.copy(costMs = nextCost)
-                _uiState.update { current ->
-                    current
-                        .copy(
-                            currentCaseName = existing.name,
-                            currentCaseElapsedMs = nextCost
-                        )
-                        .mergeFromCaseMap(activeCaseMap)
-                }
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.CasePassed -> {
-                stopCaseElapsedTicker()
-                val caseItem = event.result.toCaseUiItem()
-                activeCaseMap[event.result.caseId] = caseItem
-                _uiState.update { current ->
-                    current
-                        .copy(
-                            currentCaseName = null,
-                            currentCaseElapsedMs = 0L
-                        )
-                        .mergeFromCaseMap(activeCaseMap)
-                }
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.CaseFailed -> {
-                stopCaseElapsedTicker()
-                val caseItem = event.result.toCaseUiItem()
-                activeCaseMap[event.result.caseId] = caseItem
-                _uiState.update { current ->
-                    current
-                        .copy(
-                            currentCaseName = null,
-                            currentCaseElapsedMs = 0L,
-                            lastFailure = caseItem
-                        )
-                        .mergeFromCaseMap(activeCaseMap)
-                }
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.RunFinished -> {
-                stopCaseElapsedTicker()
-                finalizeRun(event.report, TestRunUiStatus.FINISHED)
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.RunCancelled -> {
-                stopCaseElapsedTicker()
-                finalizeRun(event.report, TestRunUiStatus.CANCELLED)
-            }
-
-            is StartupStabilityTestRunner.TestRunEvent.RunCrashed -> {
-                stopCaseElapsedTicker()
-                val crashItem = TestCaseUiItem(
-                    id = "run_crashed",
-                    name = "run_crashed",
-                    status = TestCaseUiStatus.FAILED,
-                    errorSummary = event.error.summary,
-                    errorStack = event.error.stackTrace
-                )
-                _uiState.update { current ->
-                    current.copy(
-                        runStatus = TestRunUiStatus.CRASHED,
-                        runId = event.trace.runId,
-                        currentCaseName = null,
-                        lastFailure = crashItem,
-                        message = "Full suite crashed: ${event.error.summary}"
-                    )
-                }
-                activeTestRunId = null
             }
         }
     }
@@ -260,7 +266,9 @@ class TestDashboardViewModel : ViewModel() {
         _uiState.update { current ->
             val history = (listOf(historyItem) + current.history.filterNot { it.runId == report.runId })
                 .take(MAX_HISTORY_RUNS)
-            val selectedHistory = current.selectedHistoryRunId ?: history.firstOrNull()?.runId
+            val selectedHistory = current.selectedHistoryRunId
+                ?.takeIf { selectedId -> history.any { item -> item.runId == selectedId } }
+                ?: history.firstOrNull()?.runId
             current
                 .copy(
                     runStatus = status,
@@ -278,32 +286,51 @@ class TestDashboardViewModel : ViewModel() {
     }
 
     private fun ensureCaseElapsedTicker() {
-        if (caseElapsedTickerJob?.isActive == true) {
-            return
-        }
-        caseElapsedTickerJob = viewModelScope.launch(Dispatchers.Default) {
-            while (true) {
-                delay(1_000L)
-                val runningCase = activeCaseMap.values.firstOrNull { it.status == TestCaseUiStatus.RUNNING } ?: break
-                val startEpochMs = runningCase.startEpochMs ?: continue
-                val elapsedMs = (System.currentTimeMillis() - startEpochMs).coerceAtLeast(runningCase.costMs)
-                activeCaseMap[runningCase.id] = runningCase.copy(costMs = elapsedMs)
-                _uiState.update { current ->
-                    current
-                        .copy(
-                            currentCaseName = runningCase.name,
-                            currentCaseElapsedMs = elapsedMs
-                        )
-                        .mergeFromCaseMap(activeCaseMap)
+        synchronized(stateLock) {
+            if (caseElapsedTickerJob?.isActive == true) {
+                return
+            }
+            caseElapsedTickerJob = viewModelScope.launch(Dispatchers.Default) {
+                while (isActive) {
+                    delay(1_000L)
+                    var shouldStop = false
+                    synchronized(stateLock) {
+                        val runningCase = activeCaseMap.values.firstOrNull { it.status == TestCaseUiStatus.RUNNING }
+                        if (runningCase == null) {
+                            shouldStop = true
+                            return@synchronized
+                        }
+                        val startEpochMs = runningCase.startEpochMs
+                        if (startEpochMs == null) {
+                            return@synchronized
+                        }
+                        val elapsedMs = (System.currentTimeMillis() - startEpochMs).coerceAtLeast(runningCase.costMs)
+                        activeCaseMap[runningCase.id] = runningCase.copy(costMs = elapsedMs)
+                        _uiState.update { current ->
+                            current
+                                .copy(
+                                    currentCaseName = runningCase.name,
+                                    currentCaseElapsedMs = elapsedMs
+                                )
+                                .mergeFromCaseMap(activeCaseMap)
+                        }
+                    }
+                    if (shouldStop) {
+                        break
+                    }
+                }
+                synchronized(stateLock) {
+                    caseElapsedTickerJob = null
                 }
             }
-            caseElapsedTickerJob = null
         }
     }
 
     private fun stopCaseElapsedTicker() {
-        caseElapsedTickerJob?.cancel()
-        caseElapsedTickerJob = null
+        synchronized(stateLock) {
+            caseElapsedTickerJob?.cancel()
+            caseElapsedTickerJob = null
+        }
     }
 
     private fun TestDashboardUiState.mergeFromCaseMap(caseMap: LinkedHashMap<String, TestCaseUiItem>): TestDashboardUiState {
