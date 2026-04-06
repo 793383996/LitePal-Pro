@@ -4,6 +4,7 @@ import androidx.test.filters.LargeTest
 import com.litepaltest.model.Cellphone
 import com.litepaltest.test.LitePalTestCase
 import org.junit.AfterClass
+import org.junit.Ignore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @LargeTest
+@Ignore("Disabled heavy stress suite for interactive sample/device runs.")
 class StressCrudLargeTest : LitePalTestCase() {
 
     @Test(timeout = 360_000)

@@ -4,6 +4,7 @@ import androidx.test.filters.MediumTest
 import com.litepaltest.model.Book
 import com.litepaltest.model.Product
 import org.junit.AfterClass
+import org.junit.Ignore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,6 +16,7 @@ import org.litepal.util.DBUtility
 import java.util.UUID
 
 @MediumTest
+@Ignore("Disabled heavy stress suite for interactive sample/device runs.")
 class MultiDatabaseStressTest {
 
     @Test

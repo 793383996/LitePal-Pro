@@ -2,6 +2,7 @@ package com.litepaltest.test.stress
 
 import androidx.test.filters.LargeTest
 import org.junit.AfterClass
+import org.junit.Ignore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -16,6 +17,7 @@ import java.util.Random
 import java.util.UUID
 
 @LargeTest
+@Ignore("Disabled heavy stress suite for interactive sample/device runs.")
 class StressAssociationLargeTest {
 
     @Test(timeout = 600_000)

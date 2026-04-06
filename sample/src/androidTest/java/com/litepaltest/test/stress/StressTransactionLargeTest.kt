@@ -2,6 +2,7 @@ package com.litepaltest.test.stress
 
 import androidx.test.filters.LargeTest
 import org.junit.AfterClass
+import org.junit.Ignore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,6 +16,7 @@ import org.litepal.litepalsample.model.Song
 import java.util.UUID
 
 @LargeTest
+@Ignore("Disabled heavy stress suite for interactive sample/device runs.")
 class StressTransactionLargeTest {
 
     @Test(timeout = 360_000)

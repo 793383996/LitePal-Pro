@@ -6,6 +6,16 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import org.litepal.LitePal
 import org.litepal.LitePalRuntime
 import org.litepal.extension.runInTransaction
@@ -16,12 +26,14 @@ import org.litepal.litepalsample.model.Singer
 import org.litepal.litepalsample.model.Song
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executor
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -29,56 +41,74 @@ object StartupStabilityTestRunner {
 
     private const val TAG = "LitePalStartupStability"
     private val started = AtomicBoolean(false)
+    private val cancellationSignals = ConcurrentHashMap<String, AtomicBoolean>()
 
-    internal enum class StressLevel {
+    enum class StressLevel {
         LOW,
         MEDIUM,
         HIGH
     }
 
-    internal data class StabilityConfig(
+    data class StabilityConfig(
         val enabledInDebug: Boolean = true,
         val stressLevel: StressLevel = StressLevel.HIGH,
         val showFailureToast: Boolean = true,
         val maxSlowCaseTop: Int = 5
     )
 
-    internal object DefaultConfig {
+    object DefaultConfig {
         val value = StabilityConfig()
     }
 
-    internal data class CheckpointMetric(
+    data class CheckpointMetric(
         val name: String,
         val costMs: Long
     )
 
-    internal data class CaseMetric(
+    enum class CaseStatus {
+        PASSED,
+        FAILED,
+        CANCELLED
+    }
+
+    data class CaseMetric(
+        val caseId: String,
         val caseName: String,
+        val status: CaseStatus,
         val success: Boolean,
+        val startEpochMs: Long,
+        val endEpochMs: Long,
         val costMs: Long,
         val recordsWritten: Int,
         val recordsUpdated: Int,
         val recordsDeleted: Int,
         val assertions: Int,
         val checkpoints: List<CheckpointMetric>,
+        val threadName: String,
+        val errorType: String?,
         val error: String?,
-        val errorStackHead: String?
+        val errorStackHead: String?,
+        val errorStackTrace: String?,
+        val errorRootCauseChain: String?
     )
 
-    internal data class FailureDetail(
+    data class FailureDetail(
         val caseName: String,
         val message: String,
         val stackHead: String
     )
 
-    internal data class RunMetric(
+    data class RunMetric(
         val runId: String,
         val startEpochMs: Long,
         val endEpochMs: Long,
         val totalMs: Long,
         val buildType: String,
         val stressLevel: StressLevel,
+        val cancelled: Boolean,
+        val scheduledCases: Int,
         val caseMetrics: List<CaseMetric>,
+        val pendingCaseNames: List<String>,
         val failures: List<FailureDetail>,
         val minMs: Long,
         val maxMs: Long,
@@ -87,14 +117,106 @@ object StartupStabilityTestRunner {
         val p95Ms: Long
     ) {
         val totalCases: Int
-            get() = caseMetrics.size
+            get() = scheduledCases
         val passedCount: Int
-            get() = caseMetrics.count { it.success }
+            get() = caseMetrics.count { it.status == CaseStatus.PASSED }
         val failedCount: Int
-            get() = totalCases - passedCount
+            get() = caseMetrics.count { it.status == CaseStatus.FAILED }
     }
 
-    internal fun runAsync(context: Context, config: StabilityConfig = DefaultConfig.value) {
+    data class TestErrorDetail(
+        val type: String,
+        val message: String,
+        val summary: String,
+        val stackTrace: String,
+        val rootCauseChain: String
+    )
+
+    data class TestCaseResult(
+        val caseId: String,
+        val caseName: String,
+        val status: CaseStatus,
+        val startEpochMs: Long,
+        val endEpochMs: Long,
+        val costMs: Long,
+        val recordsWritten: Int,
+        val recordsUpdated: Int,
+        val recordsDeleted: Int,
+        val assertions: Int,
+        val checkpoints: List<CheckpointMetric>,
+        val threadName: String,
+        val error: TestErrorDetail?
+    )
+
+    data class TestRunReport(
+        val runId: String,
+        val startEpochMs: Long,
+        val endEpochMs: Long,
+        val totalMs: Long,
+        val stressLevel: StressLevel,
+        val buildType: String,
+        val cancelled: Boolean,
+        val totalCases: Int,
+        val passedCount: Int,
+        val failedCount: Int,
+        val pendingCaseNames: List<String>,
+        val caseResults: List<TestCaseResult>
+    )
+
+    data class EventTrace(
+        val runId: String,
+        val caseId: String? = null,
+        val timestampEpochMs: Long = System.currentTimeMillis(),
+        val threadName: String = Thread.currentThread().name
+    )
+
+    sealed interface TestRunEvent {
+        data class RunStarted(
+            val trace: EventTrace,
+            val stressLevel: StressLevel,
+            val totalCases: Int,
+            val pendingCaseNames: List<String>
+        ) : TestRunEvent
+
+        data class CaseStarted(
+            val trace: EventTrace,
+            val caseName: String
+        ) : TestRunEvent
+
+        data class Checkpoint(
+            val trace: EventTrace,
+            val caseName: String,
+            val checkpointName: String,
+            val costMs: Long
+        ) : TestRunEvent
+
+        data class CasePassed(
+            val trace: EventTrace,
+            val result: TestCaseResult
+        ) : TestRunEvent
+
+        data class CaseFailed(
+            val trace: EventTrace,
+            val result: TestCaseResult
+        ) : TestRunEvent
+
+        data class RunCancelled(
+            val trace: EventTrace,
+            val report: TestRunReport
+        ) : TestRunEvent
+
+        data class RunFinished(
+            val trace: EventTrace,
+            val report: TestRunReport
+        ) : TestRunEvent
+
+        data class RunCrashed(
+            val trace: EventTrace,
+            val error: TestErrorDetail
+        ) : TestRunEvent
+    }
+
+    fun runAsync(context: Context, config: StabilityConfig = DefaultConfig.value) {
         if (config.enabledInDebug && !BuildConfig.DEBUG) {
             return
         }
@@ -102,15 +224,74 @@ object StartupStabilityTestRunner {
             return
         }
         val appContext = context.applicationContext
+        val runId = UUID.randomUUID().toString()
+        val cancellationSignal = AtomicBoolean(false)
         Thread(
             {
-                val suite = StartupStabilitySuite(config)
+                val suite = StartupStabilitySuite(
+                    config = config,
+                    runId = runId,
+                    cancellationSignal = cancellationSignal
+                )
                 val metric = suite.runAll()
                 logRun(metric, config)
                 showFailureToastIfNeeded(appContext, metric, config)
             },
             "litepal-startup-stability"
         ).start()
+    }
+
+    suspend fun runSuite(
+        config: StabilityConfig = DefaultConfig.value,
+        observer: (TestRunEvent) -> Unit = {}
+    ): TestRunReport {
+        val runId = UUID.randomUUID().toString()
+        val cancellationSignal = AtomicBoolean(false)
+        cancellationSignals[runId] = cancellationSignal
+        return try {
+            withContext(Dispatchers.IO) {
+                val suite = StartupStabilitySuite(
+                    config = config,
+                    runId = runId,
+                    cancellationSignal = cancellationSignal,
+                    observer = observer
+                )
+                val metric = suite.runAll()
+                logRun(metric, config)
+                val report = metric.toReport()
+                if (metric.cancelled) {
+                    observer(
+                        TestRunEvent.RunCancelled(
+                            trace = EventTrace(runId = runId),
+                            report = report
+                        )
+                    )
+                } else {
+                    observer(
+                        TestRunEvent.RunFinished(
+                            trace = EventTrace(runId = runId),
+                            report = report
+                        )
+                    )
+                }
+                report
+            }
+        } catch (t: Throwable) {
+            val error = toErrorDetail(t)
+            observer(
+                TestRunEvent.RunCrashed(
+                    trace = EventTrace(runId = runId),
+                    error = error
+                )
+            )
+            throw t
+        } finally {
+            cancellationSignals.remove(runId)
+        }
+    }
+
+    fun cancelCurrentRun(runId: String) {
+        cancellationSignals[runId]?.set(true)
     }
 
     private fun showFailureToastIfNeeded(context: Context, metric: RunMetric, config: StabilityConfig) {
@@ -157,7 +338,7 @@ object StartupStabilityTestRunner {
 
         Log.i(
             TAG,
-            "RUN_SUMMARY|runId=${metric.runId}|totalCases=${metric.totalCases}|passed=${metric.passedCount}|failed=${metric.failedCount}|totalMs=${metric.totalMs}|avgMs=${metric.avgMs}|minMs=${metric.minMs}|maxMs=${metric.maxMs}|p50=${metric.p50Ms}|p95=${metric.p95Ms}"
+            "RUN_SUMMARY|runId=${metric.runId}|totalCases=${metric.totalCases}|passed=${metric.passedCount}|failed=${metric.failedCount}|cancelled=${metric.cancelled}|pending=${metric.pendingCaseNames.size}|totalMs=${metric.totalMs}|avgMs=${metric.avgMs}|minMs=${metric.minMs}|maxMs=${metric.maxMs}|p50=${metric.p50Ms}|p95=${metric.p95Ms}"
         )
 
         val topSlow = metric.caseMetrics
@@ -186,12 +367,82 @@ object StartupStabilityTestRunner {
         return text.replace("|", "/").replace('\n', ' ').replace('\r', ' ')
     }
 
+    private fun toErrorDetail(throwable: Throwable): TestErrorDetail {
+        val message = throwable.message ?: "no message"
+        val summary = "${throwable.javaClass.simpleName}: $message"
+        val stackTrace = throwable.stackTraceToString()
+        val chain = buildString {
+            var current: Throwable? = throwable
+            while (current != null) {
+                if (isNotEmpty()) {
+                    append(" <- ")
+                }
+                append(current.javaClass.simpleName)
+                append(":")
+                append(current.message ?: "no message")
+                current = current.cause
+            }
+        }
+        return TestErrorDetail(
+            type = throwable.javaClass.name,
+            message = message,
+            summary = summary,
+            stackTrace = stackTrace,
+            rootCauseChain = chain
+        )
+    }
+
+    private fun RunMetric.toReport(): TestRunReport {
+        return TestRunReport(
+            runId = runId,
+            startEpochMs = startEpochMs,
+            endEpochMs = endEpochMs,
+            totalMs = totalMs,
+            stressLevel = stressLevel,
+            buildType = buildType,
+            cancelled = cancelled,
+            totalCases = totalCases,
+            passedCount = passedCount,
+            failedCount = failedCount,
+            pendingCaseNames = pendingCaseNames,
+            caseResults = caseMetrics.map { metric ->
+                TestCaseResult(
+                    caseId = metric.caseId,
+                    caseName = metric.caseName,
+                    status = metric.status,
+                    startEpochMs = metric.startEpochMs,
+                    endEpochMs = metric.endEpochMs,
+                    costMs = metric.costMs,
+                    recordsWritten = metric.recordsWritten,
+                    recordsUpdated = metric.recordsUpdated,
+                    recordsDeleted = metric.recordsDeleted,
+                    assertions = metric.assertions,
+                    checkpoints = metric.checkpoints,
+                    threadName = metric.threadName,
+                    error = if (metric.errorType == null || metric.error == null) {
+                        null
+                    } else {
+                        TestErrorDetail(
+                            type = metric.errorType,
+                            message = metric.error,
+                            summary = metric.error,
+                            stackTrace = metric.errorStackTrace.orEmpty(),
+                            rootCauseChain = metric.errorRootCauseChain.orEmpty()
+                        )
+                    }
+                )
+            }
+        )
+    }
+
     private class StartupStabilitySuite(
-        private val config: StabilityConfig
+        private val config: StabilityConfig,
+        private val runId: String,
+        private val cancellationSignal: AtomicBoolean,
+        private val observer: (TestRunEvent) -> Unit = {}
     ) {
 
         private val profile: StressProfile = StressProfile.from(config.stressLevel)
-        private val runId: String = UUID.randomUUID().toString()
         private val runPrefix: String = "__startup_stability_${System.currentTimeMillis()}_${runId.substring(0, 8)}"
 
         private data class StressProfile(
@@ -263,10 +514,36 @@ object StartupStabilityTestRunner {
         private data class RunState(
             val runId: String,
             val runPrefix: String,
-            val profile: StressProfile
+            val profile: StressProfile,
+            val cancellationSignal: AtomicBoolean,
+            val observer: (TestRunEvent) -> Unit,
+            val currentCaseIdRef: AtomicReference<String?>
         ) {
             fun casePrefix(caseName: String): String = "${runPrefix}_${caseName}"
+            fun trace(caseId: String? = null): EventTrace = EventTrace(runId = runId, caseId = caseId)
+            fun throwIfCancelled(point: String): Unit {
+                if (cancellationSignal.get()) {
+                    throw SuiteCancellationException(runId, point)
+                }
+            }
+
+            fun emitProgressCheckpoint(checkpointName: String) {
+                val caseId = currentCaseIdRef.get() ?: return
+                observer(
+                    TestRunEvent.Checkpoint(
+                        trace = trace(caseId),
+                        caseName = caseId,
+                        checkpointName = checkpointName,
+                        costMs = 0L
+                    )
+                )
+            }
         }
+
+        private class SuiteCancellationException(
+            val runId: String,
+            val point: String
+        ) : RuntimeException("Run $runId cancelled at $point")
 
         private interface StabilityCase {
             val name: String
@@ -295,13 +572,41 @@ object StartupStabilityTestRunner {
 
         fun runAll(): RunMetric {
             val startMs = System.currentTimeMillis()
-            val state = RunState(runId, runPrefix, profile)
+            val state = RunState(
+                runId = runId,
+                runPrefix = runPrefix,
+                profile = profile,
+                cancellationSignal = cancellationSignal,
+                observer = observer,
+                currentCaseIdRef = AtomicReference(null)
+            )
             cleanupByPrefix()
             val caseMetrics = mutableListOf<CaseMetric>()
             val failures = mutableListOf<FailureDetail>()
-            for (case in buildCases()) {
+            val allCases = buildCases()
+            state.observer(
+                TestRunEvent.RunStarted(
+                    trace = state.trace(),
+                    stressLevel = config.stressLevel,
+                    totalCases = allCases.size,
+                    pendingCaseNames = allCases.map { it.name }
+                )
+            )
+            var cancelled = false
+            var pendingCaseNames = allCases.map { it.name }
+            for ((index, case) in allCases.withIndex()) {
+                if (state.cancellationSignal.get()) {
+                    cancelled = true
+                    pendingCaseNames = allCases.drop(index).map { it.name }
+                    break
+                }
+                pendingCaseNames = allCases.drop(index + 1).map { it.name }
                 val caseMetric = executeCase(state, case)
                 caseMetrics.add(caseMetric)
+                if (caseMetric.status == CaseStatus.CANCELLED) {
+                    cancelled = true
+                    break
+                }
                 if (!caseMetric.success) {
                     failures.add(
                         FailureDetail(
@@ -322,7 +627,10 @@ object StartupStabilityTestRunner {
                 totalMs = endMs - startMs,
                 buildType = if (BuildConfig.DEBUG) "debug" else "release",
                 stressLevel = config.stressLevel,
+                cancelled = cancelled,
+                scheduledCases = allCases.size,
                 caseMetrics = caseMetrics,
+                pendingCaseNames = if (cancelled) pendingCaseNames else emptyList(),
                 failures = failures,
                 minMs = costs.minOrNull() ?: 0L,
                 maxMs = costs.maxOrNull() ?: 0L,
@@ -335,27 +643,73 @@ object StartupStabilityTestRunner {
         private fun executeCase(state: RunState, case: StabilityCase): CaseMetric {
             val mutableMetric = MutableCaseMetric()
             val caseStart = System.currentTimeMillis()
-            var error: String? = null
-            var errorStackHead: String? = null
-            var success = false
+            val trace = state.trace(case.name)
+            state.currentCaseIdRef.set(case.name)
+            state.observer(
+                TestRunEvent.CaseStarted(
+                    trace = trace,
+                    caseName = case.name
+                )
+            )
+            var errorDetail: TestErrorDetail? = null
+            var status = CaseStatus.PASSED
             try {
                 case.run(state, mutableMetric)
-                success = true
+                state.throwIfCancelled("after_case_${case.name}")
+            } catch (cancelled: SuiteCancellationException) {
+                status = CaseStatus.CANCELLED
+                errorDetail = toErrorDetail(cancelled)
             } catch (t: Throwable) {
-                error = "${t.javaClass.simpleName}: ${t.message ?: "no message"}"
-                errorStackHead = t.stackTrace.firstOrNull()?.toString() ?: "n/a"
+                status = CaseStatus.FAILED
+                errorDetail = toErrorDetail(t)
+            } finally {
+                state.currentCaseIdRef.set(null)
             }
-            return CaseMetric(
+            val caseEnd = System.currentTimeMillis()
+            val result = TestCaseResult(
+                caseId = case.name,
                 caseName = case.name,
-                success = success,
-                costMs = System.currentTimeMillis() - caseStart,
+                status = status,
+                startEpochMs = caseStart,
+                endEpochMs = caseEnd,
+                costMs = caseEnd - caseStart,
                 recordsWritten = mutableMetric.recordsWritten,
                 recordsUpdated = mutableMetric.recordsUpdated,
                 recordsDeleted = mutableMetric.recordsDeleted,
                 assertions = mutableMetric.assertions,
                 checkpoints = mutableMetric.checkpoints.toList(),
-                error = error,
-                errorStackHead = errorStackHead
+                threadName = Thread.currentThread().name,
+                error = errorDetail
+            )
+            when (status) {
+                CaseStatus.PASSED -> {
+                    state.observer(TestRunEvent.CasePassed(trace = trace, result = result))
+                }
+
+                CaseStatus.FAILED,
+                CaseStatus.CANCELLED -> {
+                    state.observer(TestRunEvent.CaseFailed(trace = trace, result = result))
+                }
+            }
+            return CaseMetric(
+                caseId = case.name,
+                caseName = case.name,
+                status = status,
+                success = status == CaseStatus.PASSED,
+                startEpochMs = caseStart,
+                endEpochMs = caseEnd,
+                costMs = caseEnd - caseStart,
+                recordsWritten = mutableMetric.recordsWritten,
+                recordsUpdated = mutableMetric.recordsUpdated,
+                recordsDeleted = mutableMetric.recordsDeleted,
+                assertions = mutableMetric.assertions,
+                checkpoints = mutableMetric.checkpoints.toList(),
+                threadName = Thread.currentThread().name,
+                errorType = errorDetail?.type,
+                error = errorDetail?.summary,
+                errorStackHead = errorDetail?.stackTrace?.lineSequence()?.firstOrNull(),
+                errorStackTrace = errorDetail?.stackTrace,
+                errorRootCauseChain = errorDetail?.rootCauseChain
             )
         }
 
@@ -413,7 +767,7 @@ object StartupStabilityTestRunner {
             requireCase(metric, song2.save(), "song2 save failed")
             metric.recordsWritten += 2
 
-            val loadedAlbum = timedStep(metric, "load_album_eager") {
+            val loadedAlbum = timedStep(state, metric, "load_album_eager") {
                 LitePal.find(Album::class.java, album.id, true)
             }
             requireCase(metric, loadedAlbum != null, "album query failed")
@@ -536,11 +890,11 @@ object StartupStabilityTestRunner {
                     isMale = index % 2 == 0
                 }
             }
-            val saveAllResult = timedStep(metric, "bulk_save") { singers.saveAll() }
+            val saveAllResult = timedStep(state, metric, "bulk_save") { singers.saveAll() }
             requireCase(metric, saveAllResult, "bulk saveAll failed")
             metric.recordsWritten += count
 
-            val actualCount = timedStep(metric, "bulk_count") {
+            val actualCount = timedStep(state, metric, "bulk_count") {
                 LitePal.where("name like ?", "${prefix}_bulk_%").count(Singer::class.java)
             }
             requireCase(metric, actualCount == count, "bulk count expected $count but got $actualCount")
@@ -548,6 +902,7 @@ object StartupStabilityTestRunner {
             var offset = 0
             var pagedTotal = 0
             while (true) {
+                state.throwIfCancelled("bulk_paged_query_offset_$offset")
                 val page = LitePal.where("name like ?", "${prefix}_bulk_%")
                     .order("id asc")
                     .limit(state.profile.bulkPageSize)
@@ -591,6 +946,7 @@ object StartupStabilityTestRunner {
 
             val singers = mutableListOf<Singer>()
             for (i in 0 until toDelete) {
+                state.throwIfCancelled("stress_update_delete_seed_delete_group_$i")
                 singers.add(
                     Singer().apply {
                         name = "${prefix}_u_$i"
@@ -600,6 +956,7 @@ object StartupStabilityTestRunner {
                 )
             }
             for (i in 0 until groupB) {
+                state.throwIfCancelled("stress_update_delete_seed_update_group_$i")
                 singers.add(
                     Singer().apply {
                         name = "${prefix}_u_${i + toDelete}"
@@ -609,6 +966,7 @@ object StartupStabilityTestRunner {
                 )
             }
             for (i in 0 until untouched) {
+                state.throwIfCancelled("stress_update_delete_seed_untouched_group_$i")
                 singers.add(
                     Singer().apply {
                         name = "${prefix}_u_${i + toUpdate}"
@@ -666,13 +1024,15 @@ object StartupStabilityTestRunner {
                     isMale = index % 2 == 0
                 }
             }
-            requireCase(metric, timedStep(metric, "save_singers") { singers.saveAll() }, "save singers failed")
+            requireCase(metric, timedStep(state, metric, "save_singers") { singers.saveAll() }, "save singers failed")
             metric.recordsWritten += singers.size
 
             val albums = mutableListOf<Album>()
             for (singerIndex in singers.indices) {
+                state.throwIfCancelled("stress_association_seed_albums_singer_$singerIndex")
                 val singer = singers[singerIndex]
                 for (albumIndex in 0 until albumPerSinger) {
+                    state.throwIfCancelled("stress_association_seed_albums_singer_${singerIndex}_album_$albumIndex")
                     albums.add(
                         Album().apply {
                             name = "${prefix}_album_${singerIndex}_$albumIndex"
@@ -686,13 +1046,15 @@ object StartupStabilityTestRunner {
                     )
                 }
             }
-            requireCase(metric, timedStep(metric, "save_albums") { albums.saveAll() }, "save albums failed")
+            requireCase(metric, timedStep(state, metric, "save_albums") { albums.saveAll() }, "save albums failed")
             metric.recordsWritten += albums.size
 
             val songs = mutableListOf<Song>()
             for (albumIndex in albums.indices) {
+                state.throwIfCancelled("stress_association_seed_songs_album_$albumIndex")
                 val album = albums[albumIndex]
                 for (songIndex in 0 until songPerAlbum) {
+                    state.throwIfCancelled("stress_association_seed_songs_album_${albumIndex}_song_$songIndex")
                     songs.add(
                         Song().apply {
                             name = "${prefix}_song_${albumIndex}_$songIndex"
@@ -703,7 +1065,7 @@ object StartupStabilityTestRunner {
                     )
                 }
             }
-            requireCase(metric, timedStep(metric, "save_songs") { songs.saveAll() }, "save songs failed")
+            requireCase(metric, timedStep(state, metric, "save_songs") { songs.saveAll() }, "save songs failed")
             metric.recordsWritten += songs.size
 
             val expectedAlbumCount = singerCount * albumPerSinger
@@ -731,6 +1093,7 @@ object StartupStabilityTestRunner {
             val repeat = state.profile.transactionRepeat
             var expectedCommitted = 0
             for (i in 0 until repeat) {
+                state.throwIfCancelled("stress_transaction_repeat_$i")
                 val shouldCommit = i % 2 == 0
                 if (shouldCommit) {
                     expectedCommitted++
@@ -760,7 +1123,7 @@ object StartupStabilityTestRunner {
                     duration = "03:33"
                 }
             }
-            val saveResult = timedStep(metric, "save_conflict_batch") {
+            val saveResult = timedStep(state, metric, "save_conflict_batch") {
                 LitePalRuntime.withSilentErrorLog {
                     runCatching { songs.saveAll() }.getOrDefault(false)
                 }
@@ -775,76 +1138,200 @@ object StartupStabilityTestRunner {
 
         private fun caseStressConcurrentReadWrite(state: RunState, metric: MutableCaseMetric) {
             val prefix = state.casePrefix("stress_concurrent_read_write")
-            val writerThreads = state.profile.concurrentWriterThreads
-            val readerThreads = state.profile.concurrentReaderThreads
-            val writesPerThread = state.profile.concurrentWritesPerThread
-            val readLoops = state.profile.concurrentReadLoops
-            val pool = Executors.newFixedThreadPool(writerThreads + readerThreads)
-            val startGate = CountDownLatch(1)
-            val doneGate = CountDownLatch(writerThreads + readerThreads)
+            val runtimeOptions = LitePalRuntime.getRuntimeOptions()
+            val serialExecutorMode = isLikelySingleThreadExecutor(runtimeOptions.queryExecutor) &&
+                isLikelySingleThreadExecutor(runtimeOptions.transactionExecutor)
+
+            // 针对 sample 的单线程执行器场景做自适应降载，避免“并发意图 -> 队列拥塞 -> 固定超时”。
+            val writerCoroutines = if (serialExecutorMode) {
+                state.profile.concurrentWriterThreads.coerceAtMost(3).coerceAtLeast(2)
+            } else {
+                state.profile.concurrentWriterThreads
+            }
+            val readerCoroutines = if (serialExecutorMode) {
+                state.profile.concurrentReaderThreads.coerceAtMost(2).coerceAtLeast(1)
+            } else {
+                state.profile.concurrentReaderThreads
+            }
+            val writesPerCoroutine = if (serialExecutorMode) {
+                state.profile.concurrentWritesPerThread.coerceAtMost(30).coerceAtLeast(20)
+            } else {
+                state.profile.concurrentWritesPerThread
+            }
+            val readLoops = if (serialExecutorMode) {
+                state.profile.concurrentReadLoops.coerceAtMost(25).coerceAtLeast(15)
+            } else {
+                state.profile.concurrentReadLoops
+            }
+            val writerBatchSize = when {
+                writesPerCoroutine >= 100 -> 20
+                writesPerCoroutine >= 60 -> 15
+                else -> 10
+            }.coerceAtLeast(1).coerceAtMost(writesPerCoroutine)
+            val writerProgressStep = (writesPerCoroutine / 5).coerceAtLeast(writerBatchSize)
+            val readerProgressStep = (readLoops / 5).coerceAtLeast(1)
+            val expectedReads = readerCoroutines * readLoops
+            val totalTimeoutMs = 30_000L
+            val stallTimeoutMs = 10_000L
             val errors = ConcurrentLinkedQueue<Throwable>()
             val written = AtomicInteger(0)
+            val reads = AtomicInteger(0)
+            val lastProgressEpoch = AtomicLong(System.currentTimeMillis())
+            val activeWriters = AtomicInteger(writerCoroutines)
 
-            repeat(writerThreads) { writerIndex ->
-                pool.execute {
-                    try {
-                        startGate.await()
-                        for (i in 0 until writesPerThread) {
-                            val singer = Singer().apply {
-                                name = "${prefix}_w${writerIndex}_$i"
-                                age = 18 + (i % 40)
-                                isMale = (writerIndex + i) % 2 == 0
+            try {
+                timedStep(state, metric, "concurrent_run") {
+                    runBlocking {
+                        withTimeout(totalTimeoutMs) {
+                            coroutineScope {
+                                val workerContext = Dispatchers.IO
+                                val startGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+                                val firstWriteGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+                                val workers = mutableListOf<kotlinx.coroutines.Deferred<Throwable?>>()
+                                state.emitProgressCheckpoint(
+                                    "concurrency_plan:writers=$writerCoroutines,readers=$readerCoroutines,writesPerWriter=$writesPerCoroutine,readsPerReader=$readLoops,batch=$writerBatchSize,serialMode=$serialExecutorMode,timeoutMs=$totalTimeoutMs"
+                                )
+
+                                repeat(writerCoroutines) { writerIndex ->
+                                    workers += async(workerContext) {
+                                        startGate.await()
+                                        runCatching {
+                                            var offset = 0
+                                            while (offset < writesPerCoroutine) {
+                                                state.throwIfCancelled("writer_${writerIndex}_$offset")
+                                                val endExclusive = (offset + writerBatchSize).coerceAtMost(writesPerCoroutine)
+                                                val batch = ArrayList<Singer>(endExclusive - offset)
+                                                for (i in offset until endExclusive) {
+                                                    batch.add(
+                                                        Singer().apply {
+                                                            name = "${prefix}_w${writerIndex}_$i"
+                                                            age = 18 + (i % 40)
+                                                            isMale = (writerIndex + i) % 2 == 0
+                                                        }
+                                                    )
+                                                }
+                                                if (!batch.saveAll()) {
+                                                    throw IllegalStateException(
+                                                        "concurrent writer batch save failed: writer=$writerIndex, from=$offset, to=${endExclusive - 1}, serialMode=$serialExecutorMode"
+                                                    )
+                                                }
+                                                val totalWritten = written.addAndGet(batch.size)
+                                                lastProgressEpoch.set(System.currentTimeMillis())
+                                                if (!firstWriteGate.isCompleted) {
+                                                    firstWriteGate.complete(Unit)
+                                                }
+                                                if (endExclusive == writesPerCoroutine || endExclusive % writerProgressStep == 0 || offset == 0) {
+                                                    state.emitProgressCheckpoint(
+                                                        "writer_$writerIndex/$endExclusive,total=$totalWritten,batch=${batch.size}"
+                                                    )
+                                                }
+                                                offset = endExclusive
+                                                if (serialExecutorMode) {
+                                                    delay(1L)
+                                                }
+                                            }
+                                        }.exceptionOrNull().also {
+                                            if (activeWriters.decrementAndGet() == 0 && !firstWriteGate.isCompleted) {
+                                                // 避免 reader 永久等待（所有 writer 未产出即退出）。
+                                                firstWriteGate.complete(Unit)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                repeat(readerCoroutines) { readerIndex ->
+                                    workers += async(workerContext) {
+                                        startGate.await()
+                                        firstWriteGate.await()
+                                        runCatching {
+                                            var previous = 0
+                                            for (i in 0 until readLoops) {
+                                                state.throwIfCancelled("reader_${readerIndex}_$i")
+                                                val count = LitePal.where("name like ?", "${prefix}_w%").count(Singer::class.java)
+                                                if (count < previous) {
+                                                    throw IllegalStateException(
+                                                        "reader observed decreasing count: reader=$readerIndex, previous=$previous, current=$count"
+                                                    )
+                                                }
+                                                previous = count
+                                                reads.incrementAndGet()
+                                                lastProgressEpoch.set(System.currentTimeMillis())
+                                                if (i == 0 || (i + 1) % readerProgressStep == 0 || i == readLoops - 1) {
+                                                    state.emitProgressCheckpoint(
+                                                        "reader_$readerIndex/${i + 1},count=$count,reads=${reads.get()}"
+                                                    )
+                                                }
+                                                if (serialExecutorMode) {
+                                                    delay(4L)
+                                                }
+                                            }
+                                        }.exceptionOrNull()
+                                    }
+                                }
+
+                                val watchdog = async(workerContext) {
+                                    startGate.await()
+                                    while (true) {
+                                        delay(5_000L)
+                                        val idleMs = System.currentTimeMillis() - lastProgressEpoch.get()
+                                        if (idleMs > stallTimeoutMs) {
+                                            throw IllegalStateException(
+                                                "concurrent run stalled: idle=${idleMs}ms, written=${written.get()}, reads=${reads.get()}, activeWriters=${activeWriters.get()}, writers=$writerCoroutines, readers=$readerCoroutines, batch=$writerBatchSize, serialMode=$serialExecutorMode"
+                                            )
+                                        }
+                                        state.emitProgressCheckpoint(
+                                            "watchdog_idle=${idleMs}ms,written=${written.get()},reads=${reads.get()},activeWriters=${activeWriters.get()}"
+                                        )
+                                    }
+                                }
+
+                                startGate.complete(Unit)
+                                workers.awaitAll().filterNotNull().forEach { errors.add(it) }
+                                state.emitProgressCheckpoint(
+                                    "concurrency_workers_done,written=${written.get()},reads=${reads.get()},activeWriters=${activeWriters.get()}"
+                                )
+                                watchdog.cancel()
+                                runCatching { watchdog.await() }.onFailure { watcherEndError ->
+                                    if (watcherEndError !is CancellationException) {
+                                        throw watcherEndError
+                                    }
+                                }
+                                state.emitProgressCheckpoint("concurrency_watchdog_stopped")
                             }
-                            if (!singer.save()) {
-                                throw IllegalStateException("concurrent writer save failed: writer=$writerIndex, i=$i")
-                            }
-                            written.incrementAndGet()
                         }
-                    } catch (t: Throwable) {
-                        errors.add(t)
-                    } finally {
-                        doneGate.countDown()
                     }
                 }
+            } catch (timeout: TimeoutCancellationException) {
+                throw IllegalStateException(
+                    "concurrent run timeout after ${totalTimeoutMs}ms: written=${written.get()}, reads=${reads.get()}, activeWriters=${activeWriters.get()}, writers=$writerCoroutines, readers=$readerCoroutines, writesPerWriter=$writesPerCoroutine, readLoops=$readLoops, serialMode=$serialExecutorMode",
+                    timeout
+                )
             }
-
-            repeat(readerThreads) { readerIndex ->
-                pool.execute {
-                    try {
-                        startGate.await()
-                        var previous = 0
-                        for (i in 0 until readLoops) {
-                            val count = LitePal.where("name like ?", "${prefix}_w%").count(Singer::class.java)
-                            if (count < previous) {
-                                throw IllegalStateException("reader observed decreasing count: reader=$readerIndex, previous=$previous, current=$count")
-                            }
-                            previous = count
-                        }
-                    } catch (t: Throwable) {
-                        errors.add(t)
-                    } finally {
-                        doneGate.countDown()
-                    }
-                }
-            }
-
-            timedStep(metric, "concurrent_run") {
-                startGate.countDown()
-                val completed = doneGate.await(180, TimeUnit.SECONDS)
-                requireCase(metric, completed, "concurrent test timeout")
-            }
-            pool.shutdownNow()
 
             requireCase(metric, errors.isEmpty(), "concurrent errors: ${errors.joinToString("; ") { it.message ?: "unknown" }}")
-            val expected = writerThreads * writesPerThread
+            val expected = writerCoroutines * writesPerCoroutine
             val actual = LitePal.where("name like ?", "${prefix}_w%").count(Singer::class.java)
             requireCase(metric, written.get() == expected, "writer counter mismatch")
+            requireCase(metric, reads.get() == expectedReads, "reader loop count mismatch")
             requireCase(metric, actual == expected, "concurrent final count expected $expected but got $actual")
 
             val names = LitePal.where("name like ?", "${prefix}_w%").find(Singer::class.java).mapNotNull { it.name }
             requireCase(metric, names.size == expected, "concurrent query result size mismatch")
             requireCase(metric, names.toSet().size == expected, "concurrent names should be unique")
             metric.recordsWritten += expected
+        }
+
+        private fun isLikelySingleThreadExecutor(executor: Executor?): Boolean {
+            if (executor == null) {
+                return false
+            }
+            if (executor is ThreadPoolExecutor) {
+                return executor.maximumPoolSize <= 1
+            }
+            val className = executor.javaClass.name
+            return className.contains("FinalizableDelegatedExecutorService", ignoreCase = false) ||
+                className.contains("DelegatedExecutorService", ignoreCase = false) ||
+                className.contains("SingleThread", ignoreCase = true)
         }
 
         private fun cleanupByPrefix() {
@@ -864,12 +1351,24 @@ object StartupStabilityTestRunner {
             return sorted[rank]
         }
 
-        private inline fun <T> timedStep(metric: MutableCaseMetric, checkpoint: String, block: () -> T): T {
+        private inline fun <T> timedStep(state: RunState, metric: MutableCaseMetric, checkpoint: String, block: () -> T): T {
+            state.throwIfCancelled("checkpoint_${checkpoint}_start")
             val start = System.currentTimeMillis()
             return try {
                 block()
             } finally {
-                metric.addCheckpoint(checkpoint, System.currentTimeMillis() - start)
+                val cost = System.currentTimeMillis() - start
+                metric.addCheckpoint(checkpoint, cost)
+                val caseId = state.currentCaseIdRef.get()
+                state.observer(
+                    TestRunEvent.Checkpoint(
+                        trace = state.trace(caseId),
+                        caseName = caseId ?: "unknown_case",
+                        checkpointName = checkpoint,
+                        costMs = cost
+                    )
+                )
+                state.throwIfCancelled("checkpoint_${checkpoint}_end")
             }
         }
 
