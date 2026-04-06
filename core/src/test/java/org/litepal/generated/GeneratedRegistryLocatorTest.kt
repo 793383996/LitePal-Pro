@@ -33,7 +33,7 @@ class GeneratedRegistryLocatorTest {
             thrown = t
         }
         assertTrue(thrown is IllegalStateException)
-        assertEquals(1L, LitePalRuntime.getReflectionFallbackCount())
+        assertEquals(1L, LitePalRuntime.getGeneratedContractViolationCount())
     }
 
     @Test

@@ -49,7 +49,7 @@ data class AggregateSummary(
 
 data class DiagnosticsSummary(
     val generatedHitCount: Long = 0L,
-    val reflectionFallbackCount: Long = 0L,
+    val generatedContractViolationCount: Long = 0L,
     val mainThreadBlockMs: Long = 0L,
     val runtimeOptions: String = "",
     val errorPolicy: String = "",
@@ -235,7 +235,7 @@ class SampleDataViewModel : ViewModel() {
                 current.copy(
                     diagnosticsSummary = DiagnosticsSummary(
                         generatedHitCount = LitePal.getGeneratedPathHitCount(),
-                        reflectionFallbackCount = LitePal.getReflectionFallbackCount(),
+                        generatedContractViolationCount = LitePal.getGeneratedContractViolationCount(),
                         mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs(),
                         runtimeOptions = options.toString(),
                         errorPolicy = LitePalRuntime.getErrorPolicy().name,

@@ -93,7 +93,7 @@ abstract class DataHandler : LitePalBase() {
                         LitePalRuntime.recordGeneratedPathHit("query.cursorMapper")
                         generatedCursorMapper.mapFromCursor(baseObj, cursor)
                     } else {
-                        LitePalRuntime.recordReflectionFallback("query.cursorMapper.missing")
+                        LitePalRuntime.recordGeneratedContractViolation("query.cursorMapper.missing")
                         throw IllegalStateException(
                             "Generated cursor mapper is REQUIRED but missing for ${modelClass.name}."
                         )
@@ -229,7 +229,7 @@ abstract class DataHandler : LitePalBase() {
                 return
             }
         }
-        LitePalRuntime.recordReflectionFallback("write.fieldBinder.missing")
+        LitePalRuntime.recordGeneratedContractViolation("write.fieldBinder.missing")
         throw IllegalStateException(
             "Generated field binder is REQUIRED but missing for ${baseObj.getClassName()}."
         )
@@ -426,7 +426,7 @@ abstract class DataHandler : LitePalBase() {
             LitePalRuntime.recordGeneratedPathHit("entityFactory.newInstance")
             return generatedFactory.newInstance()
         }
-        LitePalRuntime.recordReflectionFallback("entityFactory.missing")
+        LitePalRuntime.recordGeneratedContractViolation("entityFactory.missing")
         throw IllegalStateException(
             "Generated entity factory is REQUIRED but missing for ${modelClass.name}."
         )
@@ -1239,7 +1239,7 @@ abstract class DataHandler : LitePalBase() {
         if (accessor != null) {
             return accessor
         }
-        LitePalRuntime.recordReflectionFallback("propertyAccessor.missing")
+        LitePalRuntime.recordGeneratedContractViolation("propertyAccessor.missing")
         throw IllegalStateException(
             "Generated property accessor is REQUIRED but missing for $className."
         )

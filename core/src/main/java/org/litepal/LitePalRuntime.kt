@@ -43,7 +43,7 @@ object LitePalRuntime {
     private val transactionDispatchDepth = ThreadLocal<Int>()
     private val activeExecutorStack = ThreadLocal<ArrayDeque<Executor>>()
     private val generatedPathHitCount = AtomicLong(0L)
-    private val reflectionFallbackCount = AtomicLong(0L)
+    private val generatedContractViolationCount = AtomicLong(0L)
     private val mainThreadDbBlockTotalMs = AtomicLong(0L)
 
     @JvmStatic
@@ -115,15 +115,31 @@ object LitePalRuntime {
     }
 
     @JvmStatic
-    fun recordReflectionFallback(tag: String) {
-        reflectionFallbackCount.incrementAndGet()
+    fun recordGeneratedContractViolation(tag: String) {
+        generatedContractViolationCount.incrementAndGet()
     }
 
     @JvmStatic
     fun getGeneratedPathHitCount(): Long = generatedPathHitCount.get()
 
     @JvmStatic
-    fun getReflectionFallbackCount(): Long = reflectionFallbackCount.get()
+    fun getGeneratedContractViolationCount(): Long = generatedContractViolationCount.get()
+
+    @Deprecated(
+        message = "Use recordGeneratedContractViolation instead.",
+        replaceWith = ReplaceWith("recordGeneratedContractViolation(tag)")
+    )
+    @JvmStatic
+    fun recordReflectionFallback(tag: String) {
+        recordGeneratedContractViolation(tag)
+    }
+
+    @Deprecated(
+        message = "Use getGeneratedContractViolationCount instead.",
+        replaceWith = ReplaceWith("getGeneratedContractViolationCount()")
+    )
+    @JvmStatic
+    fun getReflectionFallbackCount(): Long = getGeneratedContractViolationCount()
 
     @JvmStatic
     fun getMainThreadDbBlockTotalMs(): Long = mainThreadDbBlockTotalMs.get()
@@ -131,7 +147,7 @@ object LitePalRuntime {
     @JvmStatic
     fun resetMetrics() {
         generatedPathHitCount.set(0L)
-        reflectionFallbackCount.set(0L)
+        generatedContractViolationCount.set(0L)
         mainThreadDbBlockTotalMs.set(0L)
     }
 

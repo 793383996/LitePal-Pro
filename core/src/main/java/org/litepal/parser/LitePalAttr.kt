@@ -116,7 +116,7 @@ class LitePalAttr private constructor() {
                 return anchorEntities
             }
             LitePalLog.e("LitePalAttr", "Missing generated anchor entities.")
-            LitePalRuntime.recordReflectionFallback("anchor.entities.missing")
+            LitePalRuntime.recordGeneratedContractViolation("anchor.entities.missing")
             throw IllegalStateException(
                 "LitePal requires generated metadata from @LitePalSchemaAnchor. " +
                     "Please configure KSP/KAPT and declare exactly one anchor."

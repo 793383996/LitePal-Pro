@@ -21,19 +21,19 @@ class LitePalRuntimeMetricsTest {
     fun recordAndResetMetrics_shouldMaintainExpectedCounters() {
         LitePalRuntime.recordGeneratedPathHit("generated.test")
         LitePalRuntime.recordGeneratedPathHit("generated.test")
-        LitePalRuntime.recordReflectionFallback("reflection.test")
+        LitePalRuntime.recordGeneratedContractViolation("contract.test")
         LitePalRuntime.onMainThreadDatabaseBlock(12)
         LitePalRuntime.onMainThreadDatabaseBlock(0)
         LitePalRuntime.onMainThreadDatabaseBlock(-3)
 
         assertEquals(2L, LitePalRuntime.getGeneratedPathHitCount())
-        assertEquals(1L, LitePalRuntime.getReflectionFallbackCount())
+        assertEquals(1L, LitePalRuntime.getGeneratedContractViolationCount())
         assertEquals(12L, LitePalRuntime.getMainThreadDbBlockTotalMs())
 
         LitePalRuntime.resetMetrics()
 
         assertEquals(0L, LitePalRuntime.getGeneratedPathHitCount())
-        assertEquals(0L, LitePalRuntime.getReflectionFallbackCount())
+        assertEquals(0L, LitePalRuntime.getGeneratedContractViolationCount())
         assertEquals(0L, LitePalRuntime.getMainThreadDbBlockTotalMs())
     }
 }

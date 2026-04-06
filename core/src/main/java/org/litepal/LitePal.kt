@@ -131,7 +131,14 @@ object LitePal {
     fun getGeneratedPathHitCount(): Long = Operator.getGeneratedPathHitCount()
 
     @JvmStatic
-    fun getReflectionFallbackCount(): Long = Operator.getReflectionFallbackCount()
+    fun getGeneratedContractViolationCount(): Long = Operator.getGeneratedContractViolationCount()
+
+    @Deprecated(
+        message = "Use getGeneratedContractViolationCount instead.",
+        replaceWith = ReplaceWith("getGeneratedContractViolationCount()")
+    )
+    @JvmStatic
+    fun getReflectionFallbackCount(): Long = getGeneratedContractViolationCount()
 
     @JvmStatic
     fun getMainThreadDbBlockTotalMs(): Long = Operator.getMainThreadDbBlockTotalMs()

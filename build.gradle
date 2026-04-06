@@ -187,15 +187,10 @@ tasks.register('verifyProcessorNegativeCases') {
 
 tasks.register('verifyGeneratedOnlyRuntimeGuards') {
     group = 'verification'
-    description = 'Fail build if core main-source reintroduces reflection or fallback hooks.'
+    description = 'Fail build if core main-source reintroduces reflection access.'
 
     doLast {
         def checks = [
-            [
-                path: 'core/src/main/java',
-                token: 'recordReflectionFallback(',
-                skipPrefix: 'fun recordReflectionFallback('
-            ],
             [path: 'core/src/main/java', token: 'Class.forName('],
             [path: 'core/src/main/java', token: 'java.lang.reflect'],
             [path: 'core/src/main/java', token: 'declaredFields'],

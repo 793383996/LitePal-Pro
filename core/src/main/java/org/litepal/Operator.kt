@@ -277,7 +277,14 @@ object Operator {
     fun getGeneratedPathHitCount(): Long = LitePalRuntime.getGeneratedPathHitCount()
 
     @JvmStatic
-    fun getReflectionFallbackCount(): Long = LitePalRuntime.getReflectionFallbackCount()
+    fun getGeneratedContractViolationCount(): Long = LitePalRuntime.getGeneratedContractViolationCount()
+
+    @Deprecated(
+        message = "Use getGeneratedContractViolationCount instead.",
+        replaceWith = ReplaceWith("getGeneratedContractViolationCount()")
+    )
+    @JvmStatic
+    fun getReflectionFallbackCount(): Long = getGeneratedContractViolationCount()
 
     @JvmStatic
     fun getMainThreadDbBlockTotalMs(): Long = LitePalRuntime.getMainThreadDbBlockTotalMs()
@@ -369,13 +376,11 @@ object Operator {
     }
 
     private fun submitPreloadTask(task: () -> Unit): Future<*> {
-        val transactionExecutor = LitePalRuntime.getRuntimeOptions().transactionExecutor
-        if (transactionExecutor != null) {
-            val futureTask = FutureTask(task)
-            transactionExecutor.execute(futureTask)
-            return futureTask
+        return preloadExecutor.submit {
+            LitePalRuntime.executeOnTransactionExecutor {
+                task()
+            }
         }
-        return preloadExecutor.submit(task)
     }
 
     private fun cancelOutdatedPreloadsLocked(currentEpoch: Long) {

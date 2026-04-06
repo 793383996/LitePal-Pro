@@ -34,7 +34,7 @@ internal fun DiagnosticsScreen(uiState: SampleDataUiState, viewModel: SampleData
             Text("Runtime Diagnostics", fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
             Text("Generated hit count: ${summary.generatedHitCount}")
-            Text("Reflection fallback count: ${summary.reflectionFallbackCount}")
+            Text("Generated contract violation count: ${summary.generatedContractViolationCount}")
             Text("Main-thread DB block (ms): ${summary.mainThreadBlockMs}")
             Text("Error policy: ${summary.errorPolicy}")
             Text("Crypto policy: ${summary.cryptoPolicy}")

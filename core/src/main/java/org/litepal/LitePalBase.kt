@@ -158,7 +158,7 @@ abstract class LitePalBase {
 
     private fun requireEntityMeta(className: String) = GeneratedRegistryLocator.findEntityMeta(className)
         ?: run {
-            LitePalRuntime.recordReflectionFallback("entity.meta.missing")
+            LitePalRuntime.recordGeneratedContractViolation("entity.meta.missing")
             throw IllegalStateException(
                 "Generated metadata is REQUIRED but entity meta is missing for $className."
             )

@@ -67,17 +67,17 @@ class SampleCrudIntegrationInstrumentationTest {
         LitePal.findAll(Song::class.java, true)
 
         val generatedHits = LitePal.getGeneratedPathHitCount()
-        val reflectionFallbacks = LitePal.getReflectionFallbackCount()
+        val contractViolations = LitePal.getGeneratedContractViolationCount()
         val mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs()
 
         assertTrue(generatedHits >= 0L)
-        assertTrue(reflectionFallbacks >= 0L)
+        assertTrue(contractViolations >= 0L)
         assertTrue(mainThreadBlockMs >= 0L)
 
         LitePal.resetRuntimeMetrics()
 
         assertEquals(0L, LitePal.getGeneratedPathHitCount())
-        assertEquals(0L, LitePal.getReflectionFallbackCount())
+        assertEquals(0L, LitePal.getGeneratedContractViolationCount())
         assertEquals(0L, LitePal.getMainThreadDbBlockTotalMs())
     }
 

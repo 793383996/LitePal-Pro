@@ -294,7 +294,7 @@ class CorePerformanceBaselineInstrumentationTest {
             sqlCount = sqlCount,
             failureRate = failureRate,
             generatedHitCount = LitePal.getGeneratedPathHitCount(),
-            reflectionFallbackCount = LitePal.getReflectionFallbackCount(),
+            generatedContractViolationCount = LitePal.getGeneratedContractViolationCount(),
             mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs()
         )
     }
@@ -307,7 +307,7 @@ class CorePerformanceBaselineInstrumentationTest {
                 "sqlCount=${metrics.sqlCount}, " +
                 "failureRate=${"%.4f".format(metrics.failureRate)}, " +
                 "generatedHitCount=${metrics.generatedHitCount}, " +
-                "reflectionFallbackCount=${metrics.reflectionFallbackCount}, " +
+                "generatedContractViolationCount=${metrics.generatedContractViolationCount}, " +
                 "mainThreadBlockMs=${metrics.mainThreadBlockMs}"
         )
     }
@@ -318,7 +318,7 @@ class CorePerformanceBaselineInstrumentationTest {
         val sqlCount: Long,
         val failureRate: Double,
         val generatedHitCount: Long,
-        val reflectionFallbackCount: Long,
+        val generatedContractViolationCount: Long,
         val mainThreadBlockMs: Long
     )
 }
