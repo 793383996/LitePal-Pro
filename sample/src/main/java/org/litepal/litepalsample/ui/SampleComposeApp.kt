@@ -494,7 +494,6 @@ private fun DiagnosticsScreen(uiState: SampleUiState, viewModel: SampleViewModel
             Text("Main-thread DB block (ms): ${summary.mainThreadBlockMs}")
             Text("Error policy: ${summary.errorPolicy}")
             Text("Crypto policy: ${summary.cryptoPolicy}")
-            Text("Generated metadata mode: ${summary.generatedMetadataMode}")
             Text("Schema validation mode: ${summary.schemaValidationMode}")
             Text("Listener registered: ${summary.listenerRegistered}")
             Text("Preload status: ${summary.preloadStatus}")

@@ -1,6 +1,10 @@
-# LitePal relies on runtime reflection for model classes and annotations.
+# LitePal requires generated metadata and loads registry implementations via ServiceLoader.
 
 -keep class org.litepal.** { *; }
+
+-keep interface org.litepal.generated.LitePalGeneratedRegistry
+-keep class * implements org.litepal.generated.LitePalGeneratedRegistry { *; }
+-keepnames class * implements org.litepal.generated.LitePalGeneratedRegistry
 
 -keep class * extends org.litepal.crud.LitePalSupport {
     <fields>;

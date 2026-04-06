@@ -1,7 +1,6 @@
 package org.litepal.litepalsample
 
 import android.app.Application
-import org.litepal.GeneratedMetadataMode
 import org.litepal.LitePal
 import org.litepal.LitePalCryptoPolicy
 import org.litepal.LitePalErrorPolicy
@@ -31,7 +30,6 @@ class MyApplication : Application() {
                 mainThreadViolationPolicy = MainThreadViolationPolicy.THROW,
                 queryExecutor = queryExecutor,
                 transactionExecutor = transactionExecutor,
-                generatedMetadataMode = GeneratedMetadataMode.REQUIRED,
                 schemaValidationMode = SchemaValidationMode.STRICT
             )
         )

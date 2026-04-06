@@ -230,7 +230,6 @@ class Song : LitePalSupport() {
 `MyApplication.kt`：
 ```kotlin
 import android.app.Application
-import org.litepal.GeneratedMetadataMode
 import org.litepal.LitePal
 import org.litepal.LitePalCryptoPolicy
 import org.litepal.LitePalErrorPolicy
@@ -251,7 +250,6 @@ class MyApplication : Application() {
                 mainThreadViolationPolicy = MainThreadViolationPolicy.THROW,
                 queryExecutor = Executors.newSingleThreadExecutor(),
                 transactionExecutor = Executors.newSingleThreadExecutor(),
-                generatedMetadataMode = GeneratedMetadataMode.REQUIRED,
                 schemaValidationMode = SchemaValidationMode.STRICT
             )
         )
@@ -630,7 +628,6 @@ LitePal.setRuntimeOptions(
         mainThreadViolationPolicy = MainThreadViolationPolicy.THROW,
         queryExecutor = Executors.newSingleThreadExecutor(),
         transactionExecutor = Executors.newSingleThreadExecutor(),
-        generatedMetadataMode = GeneratedMetadataMode.REQUIRED,
         schemaValidationMode = SchemaValidationMode.STRICT
     )
 )

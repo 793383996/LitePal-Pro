@@ -1,6 +1,7 @@
 package org.litepal.generated
 
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,6 +15,7 @@ class GeneratedRegistryLocatorTest {
     fun tearDown() {
         GeneratedRegistryLocator.resetForTesting()
         LitePalRuntime.setRuntimeOptions(LitePalRuntimeOptions())
+        LitePalRuntime.resetMetrics()
     }
 
     @Test
@@ -23,6 +25,7 @@ class GeneratedRegistryLocatorTest {
 
     @Test
     fun registryShouldFailFastWhenGeneratedRegistryMissing() {
+        LitePalRuntime.resetMetrics()
         var thrown: Throwable? = null
         try {
             GeneratedRegistryLocator.registry()
@@ -30,6 +33,7 @@ class GeneratedRegistryLocatorTest {
             thrown = t
         }
         assertTrue(thrown is IllegalStateException)
+        assertEquals(1L, LitePalRuntime.getReflectionFallbackCount())
     }
 
     @Test

@@ -7,6 +7,5 @@ data class LitePalRuntimeOptions(
     val mainThreadViolationPolicy: MainThreadViolationPolicy = MainThreadViolationPolicy.THROW,
     val queryExecutor: Executor? = LitePalExecutors.defaultQueryExecutor(),
     val transactionExecutor: Executor? = LitePalExecutors.defaultTransactionExecutor(),
-    val generatedMetadataMode: GeneratedMetadataMode = GeneratedMetadataMode.REQUIRED,
     val schemaValidationMode: SchemaValidationMode = SchemaValidationMode.STRICT
 )

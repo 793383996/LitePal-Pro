@@ -18,6 +18,7 @@ package org.litepal.parser
 
 import android.text.TextUtils
 import org.litepal.exceptions.InvalidAttributesException
+import org.litepal.LitePalRuntime
 import org.litepal.generated.GeneratedRegistryLocator
 import org.litepal.util.BaseUtility
 import org.litepal.util.Const
@@ -115,6 +116,7 @@ class LitePalAttr private constructor() {
                 return anchorEntities
             }
             LitePalLog.e("LitePalAttr", "Missing generated anchor entities.")
+            LitePalRuntime.recordReflectionFallback("anchor.entities.missing")
             throw IllegalStateException(
                 "LitePal requires generated metadata from @LitePalSchemaAnchor. " +
                     "Please configure KSP/KAPT and declare exactly one anchor."

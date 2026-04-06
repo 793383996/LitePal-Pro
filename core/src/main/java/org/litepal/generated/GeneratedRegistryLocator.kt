@@ -1,5 +1,6 @@
 package org.litepal.generated
 
+import org.litepal.LitePalRuntime
 import org.litepal.crud.LitePalSupport
 import org.litepal.util.LitePalLog
 import java.util.ServiceLoader
@@ -78,10 +79,12 @@ object GeneratedRegistryLocator {
             val iterator = serviceLoader.iterator()
             if (!iterator.hasNext()) {
                 LitePalLog.d(TAG, "No generated LitePal registry service found in classpath.")
+                LitePalRuntime.recordReflectionFallback("registry.missing")
                 return null
             }
             val first = iterator.next()
             if (iterator.hasNext()) {
+                LitePalRuntime.recordReflectionFallback("registry.multiple")
                 throw IllegalStateException(
                     "Multiple LitePal generated registries were discovered via ServiceLoader. " +
                         "Please keep exactly one @LitePalSchemaAnchor in the app classpath."
@@ -93,6 +96,7 @@ object GeneratedRegistryLocator {
             throw e
         } catch (t: Throwable) {
             LitePalLog.e(TAG, "Failed to load generated LitePal registry.", t)
+            LitePalRuntime.recordReflectionFallback("registry.load.failed")
             null
         }
     }

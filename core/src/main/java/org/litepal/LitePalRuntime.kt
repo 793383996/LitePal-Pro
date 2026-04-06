@@ -22,6 +22,7 @@ import org.litepal.util.LitePalLog
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
 import java.util.concurrent.FutureTask
+import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 
 object LitePalRuntime {
@@ -40,6 +41,7 @@ object LitePalRuntime {
     private val silentErrorLogDepth = ThreadLocal<Int>()
     private val queryDispatchDepth = ThreadLocal<Int>()
     private val transactionDispatchDepth = ThreadLocal<Int>()
+    private val activeExecutorStack = ThreadLocal<ArrayDeque<Executor>>()
     private val generatedPathHitCount = AtomicLong(0L)
     private val reflectionFallbackCount = AtomicLong(0L)
     private val mainThreadDbBlockTotalMs = AtomicLong(0L)
@@ -183,21 +185,28 @@ object LitePalRuntime {
         if (executor == null) {
             return block()
         }
+        if (isExecutorActive(executor)) {
+            // Prevent self-deadlock when query/transaction executors are configured to the same
+            // single-thread executor and an operation nests cross-executor dispatches.
+            return block()
+        }
         val currentDepth = dispatchDepth.get() ?: 0
         if (currentDepth > 0) {
             return block()
         }
         val task = FutureTask {
-            val nestedDepth = dispatchDepth.get() ?: 0
-            dispatchDepth.set(nestedDepth + 1)
-            try {
-                block()
-            } finally {
-                val nextDepth = (dispatchDepth.get() ?: 1) - 1
-                if (nextDepth <= 0) {
-                    dispatchDepth.remove()
-                } else {
-                    dispatchDepth.set(nextDepth)
+            withActiveExecutor(executor) {
+                val nestedDepth = dispatchDepth.get() ?: 0
+                dispatchDepth.set(nestedDepth + 1)
+                try {
+                    block()
+                } finally {
+                    val nextDepth = (dispatchDepth.get() ?: 1) - 1
+                    if (nextDepth <= 0) {
+                        dispatchDepth.remove()
+                    } else {
+                        dispatchDepth.set(nextDepth)
+                    }
                 }
             }
         }
@@ -210,6 +219,36 @@ object LitePalRuntime {
                 throw cause
             }
             throw LitePalSupportException(cause.message, cause)
+        }
+    }
+
+    private fun isExecutorActive(executor: Executor): Boolean {
+        val stack = activeExecutorStack.get() ?: return false
+        return stack.any { it === executor }
+    }
+
+    private inline fun <T> withActiveExecutor(executor: Executor, block: () -> T): T {
+        val stack = activeExecutorStack.get() ?: ArrayDeque<Executor>().also {
+            activeExecutorStack.set(it)
+        }
+        stack.addLast(executor)
+        return try {
+            block()
+        } finally {
+            if (stack.isNotEmpty() && stack.last() === executor) {
+                stack.removeLast()
+            } else {
+                val descending = stack.descendingIterator()
+                while (descending.hasNext()) {
+                    if (descending.next() === executor) {
+                        descending.remove()
+                        break
+                    }
+                }
+            }
+            if (stack.isEmpty()) {
+                activeExecutorStack.remove()
+            }
         }
     }
 }
