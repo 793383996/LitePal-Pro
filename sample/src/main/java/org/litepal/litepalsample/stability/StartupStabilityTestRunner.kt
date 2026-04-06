@@ -658,7 +658,7 @@ object StartupStabilityTestRunner {
                 age = 26
                 isMale = true
             }
-            requireCase(metric, singer.save(), "singer save failed")
+            requireCase(metric, timedStep(state, metric, "lp_save__basic_singer") { singer.save() }, "singer save failed")
             metric.recordsWritten++
 
             val album = Album().apply {
@@ -670,7 +670,7 @@ object StartupStabilityTestRunner {
                 release = Date()
                 this.singer = singer
             }
-            requireCase(metric, album.save(), "album save failed")
+            requireCase(metric, timedStep(state, metric, "lp_save__basic_album") { album.save() }, "album save failed")
             metric.recordsWritten++
 
             val song1 = Song().apply {
@@ -685,16 +685,20 @@ object StartupStabilityTestRunner {
                 duration = "03:22"
                 this.album = album
             }
-            requireCase(metric, song1.save(), "song1 save failed")
-            requireCase(metric, song2.save(), "song2 save failed")
+            val songsSaved = timedStep(state, metric, "lp_save__basic_songs") {
+                song1.save() && song2.save()
+            }
+            requireCase(metric, songsSaved, "song save failed")
             metric.recordsWritten += 2
 
-            val loadedAlbum = timedStep(state, metric, "load_album_eager") {
+            val loadedAlbum = timedStep(state, metric, "lp_find__album_eager") {
                 LitePal.find(Album::class.java, album.id, true)
             }
             requireCase(metric, loadedAlbum != null, "album query failed")
             requireCase(metric, loadedAlbum?.singer?.id == singer.id, "album-singer association failed")
-            val songCount = LitePal.where("album_id = ?", album.id.toString()).count("song")
+            val songCount = timedStep(state, metric, "lp_count__songs_by_album") {
+                LitePal.where("album_id = ?", album.id.toString()).count("song")
+            }
             requireCase(metric, songCount == 2, "expected 2 songs but got $songCount")
         }
 
@@ -710,20 +714,30 @@ object StartupStabilityTestRunner {
                 age = 30
                 isMale = false
             }
-            requireCase(metric, singer1.save(), "aggregate singer1 save failed")
-            requireCase(metric, singer2.save(), "aggregate singer2 save failed")
+            requireCase(metric, timedStep(state, metric, "lp_save__agg_singer_1") { singer1.save() }, "aggregate singer1 save failed")
+            requireCase(metric, timedStep(state, metric, "lp_save__agg_singer_2") { singer2.save() }, "aggregate singer2 save failed")
             metric.recordsWritten += 2
 
             val condition = "${prefix}_agg_%"
-            val count = LitePal.where("name like ?", condition).count(Singer::class.java)
-            val maxAge = LitePal.where("name like ?", condition)
-                .max(Singer::class.java, "age", Int::class.javaObjectType)
-            val minAge = LitePal.where("name like ?", condition)
-                .min(Singer::class.java, "age", Int::class.javaObjectType)
-            val sumAge = LitePal.where("name like ?", condition)
-                .sum(Singer::class.java, "age", Int::class.javaObjectType)
-            val averageAge = LitePal.where("name like ?", condition)
-                .average(Singer::class.java, "age")
+            val count = timedStep(state, metric, "lp_count__agg_singers") {
+                LitePal.where("name like ?", condition).count(Singer::class.java)
+            }
+            val maxAge = timedStep(state, metric, "lp_max__agg_age") {
+                LitePal.where("name like ?", condition)
+                    .max(Singer::class.java, "age", Int::class.javaObjectType)
+            }
+            val minAge = timedStep(state, metric, "lp_min__agg_age") {
+                LitePal.where("name like ?", condition)
+                    .min(Singer::class.java, "age", Int::class.javaObjectType)
+            }
+            val sumAge = timedStep(state, metric, "lp_sum__agg_age") {
+                LitePal.where("name like ?", condition)
+                    .sum(Singer::class.java, "age", Int::class.javaObjectType)
+            }
+            val averageAge = timedStep(state, metric, "lp_average__agg_age") {
+                LitePal.where("name like ?", condition)
+                    .average(Singer::class.java, "age")
+            }
 
             requireCase(metric, count == 2, "aggregate count expected 2 but got $count")
             requireCase(metric, maxAge == 30, "max age expected 30 but got $maxAge")
@@ -739,16 +753,20 @@ object StartupStabilityTestRunner {
                 age = 18
                 isMale = true
             }
-            requireCase(metric, singer.save(), "update singer save failed")
+            requireCase(metric, timedStep(state, metric, "lp_save__update_target") { singer.save() }, "update singer save failed")
             metric.recordsWritten++
 
             val updater = Singer().apply {
                 age = 41
             }
-            val updateRows = updater.update(singer.id)
+            val updateRows = timedStep(state, metric, "lp_update__update_target") {
+                updater.update(singer.id)
+            }
             metric.recordsUpdated += updateRows
             requireCase(metric, updateRows == 1, "update affected rows expected 1 but got $updateRows")
-            val updatedSinger = LitePal.find(Singer::class.java, singer.id)
+            val updatedSinger = timedStep(state, metric, "lp_find__updated_singer") {
+                LitePal.find(Singer::class.java, singer.id)
+            }
             requireCase(metric, updatedSinger?.age == 41, "updated age expected 41 but got ${updatedSinger?.age}")
 
             val song = Song().apply {
@@ -756,28 +774,36 @@ object StartupStabilityTestRunner {
                 lyric = "${prefix}_delete_lyric"
                 duration = "02:59"
             }
-            requireCase(metric, song.save(), "delete song save failed")
+            requireCase(metric, timedStep(state, metric, "lp_save__delete_song") { song.save() }, "delete song save failed")
             metric.recordsWritten++
-            val deletedRows = LitePal.delete(Song::class.java, song.id)
+            val deletedRows = timedStep(state, metric, "lp_delete__delete_song") {
+                LitePal.delete(Song::class.java, song.id)
+            }
             metric.recordsDeleted += deletedRows
             requireCase(metric, deletedRows >= 1, "delete affected rows expected >=1 but got $deletedRows")
-            val deletedSong = LitePal.find(Song::class.java, song.id)
+            val deletedSong = timedStep(state, metric, "lp_find__deleted_song") {
+                LitePal.find(Song::class.java, song.id)
+            }
             requireCase(metric, deletedSong == null, "song should not exist after delete")
         }
 
         private fun caseTransactionCommitBasic(state: RunState, metric: MutableCaseMetric) {
             val prefix = state.casePrefix("transaction_commit_basic")
             val commitName = "${prefix}_tx_commit"
-            val committed = LitePal.runInTransaction {
-                val singer = Singer().apply {
-                    name = commitName
-                    age = 36
-                    isMale = true
+            val committed = timedStep(state, metric, "lp_run_in_tx__commit") {
+                LitePal.runInTransaction {
+                    val singer = Singer().apply {
+                        name = commitName
+                        age = 36
+                        isMale = true
+                    }
+                    singer.save()
                 }
-                singer.save()
             }
             requireCase(metric, committed, "transaction commit should return true")
-            val count = LitePal.where("name = ?", commitName).count(Singer::class.java)
+            val count = timedStep(state, metric, "lp_count__commit_verify") {
+                LitePal.where("name = ?", commitName).count(Singer::class.java)
+            }
             requireCase(metric, count == 1, "commit data should be persisted")
             metric.recordsWritten++
         }
@@ -785,19 +811,23 @@ object StartupStabilityTestRunner {
         private fun caseTransactionRollbackBasic(state: RunState, metric: MutableCaseMetric) {
             val prefix = state.casePrefix("transaction_rollback_basic")
             val rollbackName = "${prefix}_tx_rollback"
-            val rollbackResult = LitePal.runInTransaction {
-                val singer = Singer().apply {
-                    name = rollbackName
-                    age = 45
-                    isMale = false
+            val rollbackResult = timedStep(state, metric, "lp_run_in_tx__rollback") {
+                LitePal.runInTransaction {
+                    val singer = Singer().apply {
+                        name = rollbackName
+                        age = 45
+                        isMale = false
+                    }
+                    requireCase(metric, singer.save(), "rollback singer save failed")
+                    // In strict mode, throwing from transaction block will be escalated by runtime policy.
+                    // Use explicit `false` to verify rollback path deterministically across policies.
+                    false
                 }
-                requireCase(metric, singer.save(), "rollback singer save failed")
-                // In strict mode, throwing from transaction block will be escalated by runtime policy.
-                // Use explicit `false` to verify rollback path deterministically across policies.
-                false
             }
             requireCase(metric, !rollbackResult, "transaction rollback should return false")
-            val count = LitePal.where("name = ?", rollbackName).count(Singer::class.java)
+            val count = timedStep(state, metric, "lp_count__rollback_verify") {
+                LitePal.where("name = ?", rollbackName).count(Singer::class.java)
+            }
             requireCase(metric, count == 0, "rollback data should not be persisted")
             metric.recordsWritten++
         }
@@ -812,40 +842,50 @@ object StartupStabilityTestRunner {
                     isMale = index % 2 == 0
                 }
             }
-            val saveAllResult = timedStep(state, metric, "bulk_save") { singers.saveAll() }
+            val saveAllResult = timedStep(state, metric, "lp_save_all__bulk_singers") { singers.saveAll() }
             requireCase(metric, saveAllResult, "bulk saveAll failed")
             metric.recordsWritten += count
 
-            val actualCount = timedStep(state, metric, "bulk_count") {
+            val actualCount = timedStep(state, metric, "lp_count__bulk_singers") {
                 LitePal.where("name like ?", "${prefix}_bulk_%").count(Singer::class.java)
             }
             requireCase(metric, actualCount == count, "bulk count expected $count but got $actualCount")
 
             var offset = 0
             var pagedTotal = 0
-            while (true) {
-                state.throwIfCancelled("bulk_paged_query_offset_$offset")
-                val page = LitePal.where("name like ?", "${prefix}_bulk_%")
-                    .order("id asc")
-                    .limit(state.profile.bulkPageSize)
-                    .offset(offset)
-                    .find(Singer::class.java)
-                if (page.isEmpty()) {
-                    break
+            timedStep(state, metric, "lp_find__bulk_paged_query") {
+                while (true) {
+                    state.throwIfCancelled("bulk_paged_query_offset_$offset")
+                    val page = LitePal.where("name like ?", "${prefix}_bulk_%")
+                        .order("id asc")
+                        .limit(state.profile.bulkPageSize)
+                        .offset(offset)
+                        .find(Singer::class.java)
+                    if (page.isEmpty()) {
+                        break
+                    }
+                    pagedTotal += page.size
+                    offset += page.size
                 }
-                pagedTotal += page.size
-                offset += page.size
             }
             requireCase(metric, pagedTotal == count, "paged query expected $count but got $pagedTotal")
 
-            val maxAge = LitePal.where("name like ?", "${prefix}_bulk_%")
-                .max(Singer::class.java, "age", Int::class.javaObjectType)
-            val minAge = LitePal.where("name like ?", "${prefix}_bulk_%")
-                .min(Singer::class.java, "age", Int::class.javaObjectType)
-            val sumAge = LitePal.where("name like ?", "${prefix}_bulk_%")
-                .sum(Singer::class.java, "age", Int::class.javaObjectType)
-            val averageAge = LitePal.where("name like ?", "${prefix}_bulk_%")
-                .average(Singer::class.java, "age")
+            val maxAge = timedStep(state, metric, "lp_max__bulk_age") {
+                LitePal.where("name like ?", "${prefix}_bulk_%")
+                    .max(Singer::class.java, "age", Int::class.javaObjectType)
+            }
+            val minAge = timedStep(state, metric, "lp_min__bulk_age") {
+                LitePal.where("name like ?", "${prefix}_bulk_%")
+                    .min(Singer::class.java, "age", Int::class.javaObjectType)
+            }
+            val sumAge = timedStep(state, metric, "lp_sum__bulk_age") {
+                LitePal.where("name like ?", "${prefix}_bulk_%")
+                    .sum(Singer::class.java, "age", Int::class.javaObjectType)
+            }
+            val averageAge = timedStep(state, metric, "lp_average__bulk_age") {
+                LitePal.where("name like ?", "${prefix}_bulk_%")
+                    .average(Singer::class.java, "age")
+            }
 
             val cycleSum = 3160
             val fullCycles = count / 80
@@ -897,36 +937,50 @@ object StartupStabilityTestRunner {
                     }
                 )
             }
-            requireCase(metric, singers.saveAll(), "stress update/delete saveAll failed")
+            requireCase(
+                metric,
+                timedStep(state, metric, "lp_save_all__update_delete_seed") { singers.saveAll() },
+                "stress update/delete saveAll failed"
+            )
             metric.recordsWritten += total
 
             val values = ContentValues().apply {
                 put("age", 66)
             }
             // Use ContentValues update to avoid overriding unrelated fields (name/isMale) to defaults.
-            val rowsUpdated = LitePal.updateAll(
-                Singer::class.java,
-                values,
-                "name like ? and age = ?",
-                "${prefix}_u_%",
-                "10"
-            )
+            val rowsUpdated = timedStep(state, metric, "lp_update_all__update_delete_age") {
+                LitePal.updateAll(
+                    Singer::class.java,
+                    values,
+                    "name like ? and age = ?",
+                    "${prefix}_u_%",
+                    "10"
+                )
+            }
             metric.recordsUpdated += rowsUpdated
             requireCase(metric, rowsUpdated == toUpdate, "expected update rows $toUpdate but got $rowsUpdated")
 
-            val rowsDeleted = LitePal.deleteAll(
-                Singer::class.java,
-                "name like ? and age = ? and ismale = ?",
-                "${prefix}_u_%",
-                "66",
-                "1"
-            )
+            val rowsDeleted = timedStep(state, metric, "lp_delete_all__update_delete_group_a") {
+                LitePal.deleteAll(
+                    Singer::class.java,
+                    "name like ? and age = ? and ismale = ?",
+                    "${prefix}_u_%",
+                    "66",
+                    "1"
+                )
+            }
             metric.recordsDeleted += rowsDeleted
             requireCase(metric, rowsDeleted == toDelete, "expected delete rows $toDelete but got $rowsDeleted")
 
-            val remaining = LitePal.where("name like ?", "${prefix}_u_%").count(Singer::class.java)
-            val updatedRemaining = LitePal.where("name like ? and age = ?", "${prefix}_u_%", "66").count(Singer::class.java)
-            val untouchedRemaining = LitePal.where("name like ? and age = ?", "${prefix}_u_%", "30").count(Singer::class.java)
+            val remaining = timedStep(state, metric, "lp_count__update_delete_remaining") {
+                LitePal.where("name like ?", "${prefix}_u_%").count(Singer::class.java)
+            }
+            val updatedRemaining = timedStep(state, metric, "lp_count__update_delete_updated_remaining") {
+                LitePal.where("name like ? and age = ?", "${prefix}_u_%", "66").count(Singer::class.java)
+            }
+            val untouchedRemaining = timedStep(state, metric, "lp_count__update_delete_untouched_remaining") {
+                LitePal.where("name like ? and age = ?", "${prefix}_u_%", "30").count(Singer::class.java)
+            }
 
             requireCase(metric, remaining == total - toDelete, "remaining count mismatch")
             requireCase(metric, updatedRemaining == groupB, "updated remaining count mismatch")
@@ -946,7 +1000,7 @@ object StartupStabilityTestRunner {
                     isMale = index % 2 == 0
                 }
             }
-            requireCase(metric, timedStep(state, metric, "save_singers") { singers.saveAll() }, "save singers failed")
+            requireCase(metric, timedStep(state, metric, "lp_save_all__assoc_singers") { singers.saveAll() }, "save singers failed")
             metric.recordsWritten += singers.size
 
             val albums = mutableListOf<Album>()
@@ -968,7 +1022,7 @@ object StartupStabilityTestRunner {
                     )
                 }
             }
-            requireCase(metric, timedStep(state, metric, "save_albums") { albums.saveAll() }, "save albums failed")
+            requireCase(metric, timedStep(state, metric, "lp_save_all__assoc_albums") { albums.saveAll() }, "save albums failed")
             metric.recordsWritten += albums.size
 
             val songs = mutableListOf<Song>()
@@ -987,26 +1041,36 @@ object StartupStabilityTestRunner {
                     )
                 }
             }
-            requireCase(metric, timedStep(state, metric, "save_songs") { songs.saveAll() }, "save songs failed")
+            requireCase(metric, timedStep(state, metric, "lp_save_all__assoc_songs") { songs.saveAll() }, "save songs failed")
             metric.recordsWritten += songs.size
 
             val expectedAlbumCount = singerCount * albumPerSinger
             val expectedSongCount = expectedAlbumCount * songPerAlbum
-            val realSingerCount = LitePal.where("name like ?", "${prefix}_singer_%").count(Singer::class.java)
-            val realAlbumCount = LitePal.where("name like ?", "${prefix}_album_%").count(Album::class.java)
-            val realSongCount = LitePal.where("name like ?", "${prefix}_song_%").count(Song::class.java)
+            val realSingerCount = timedStep(state, metric, "lp_count__assoc_singers") {
+                LitePal.where("name like ?", "${prefix}_singer_%").count(Singer::class.java)
+            }
+            val realAlbumCount = timedStep(state, metric, "lp_count__assoc_albums") {
+                LitePal.where("name like ?", "${prefix}_album_%").count(Album::class.java)
+            }
+            val realSongCount = timedStep(state, metric, "lp_count__assoc_songs") {
+                LitePal.where("name like ?", "${prefix}_song_%").count(Song::class.java)
+            }
             requireCase(metric, realSingerCount == singerCount, "singer count mismatch")
             requireCase(metric, realAlbumCount == expectedAlbumCount, "album count mismatch")
             requireCase(metric, realSongCount == expectedSongCount, "song count mismatch")
 
-            val eagerAlbum = LitePal.where("name like ?", "${prefix}_album_%")
-                .order("id asc")
-                .findFirst(Album::class.java, true)
+            val eagerAlbum = timedStep(state, metric, "lp_find_first__assoc_album_eager") {
+                LitePal.where("name like ?", "${prefix}_album_%")
+                    .order("id asc")
+                    .findFirst(Album::class.java, true)
+            }
             requireCase(metric, eagerAlbum != null, "eager album query failed")
             requireCase(metric, eagerAlbum?.singer != null, "eager singer relation missing")
 
             val firstSinger = singers.first()
-            val firstSingerAlbumCount = LitePal.where("singer_id = ?", firstSinger.id.toString()).count("album")
+            val firstSingerAlbumCount = timedStep(state, metric, "lp_count__assoc_first_singer_album_count") {
+                LitePal.where("singer_id = ?", firstSinger.id.toString()).count("album")
+            }
             requireCase(metric, firstSingerAlbumCount == albumPerSinger, "first singer album count mismatch")
         }
 
@@ -1014,25 +1078,29 @@ object StartupStabilityTestRunner {
             val prefix = state.casePrefix("stress_transaction_repeat")
             val repeat = state.profile.transactionRepeat
             var expectedCommitted = 0
-            for (i in 0 until repeat) {
-                state.throwIfCancelled("stress_transaction_repeat_$i")
-                val shouldCommit = i % 2 == 0
-                if (shouldCommit) {
-                    expectedCommitted++
-                }
-                val result = LitePal.runInTransaction {
-                    val singer = Singer().apply {
-                        name = "${prefix}_tx_$i"
-                        age = 20 + i % 60
-                        isMale = i % 2 == 0
+            timedStep(state, metric, "lp_run_in_tx__repeat_loop") {
+                for (i in 0 until repeat) {
+                    state.throwIfCancelled("stress_transaction_repeat_$i")
+                    val shouldCommit = i % 2 == 0
+                    if (shouldCommit) {
+                        expectedCommitted++
                     }
-                    requireCase(metric, singer.save(), "transaction save failed on $i")
-                    shouldCommit
+                    val result = LitePal.runInTransaction {
+                        val singer = Singer().apply {
+                            name = "${prefix}_tx_$i"
+                            age = 20 + i % 60
+                            isMale = i % 2 == 0
+                        }
+                        requireCase(metric, singer.save(), "transaction save failed on $i")
+                        shouldCommit
+                    }
+                    metric.recordsWritten++
+                    requireCase(metric, result == shouldCommit, "transaction result mismatch at $i")
                 }
-                metric.recordsWritten++
-                requireCase(metric, result == shouldCommit, "transaction result mismatch at $i")
             }
-            val actualCommitted = LitePal.where("name like ?", "${prefix}_tx_%").count(Singer::class.java)
+            val actualCommitted = timedStep(state, metric, "lp_count__tx_repeat_verify") {
+                LitePal.where("name like ?", "${prefix}_tx_%").count(Singer::class.java)
+            }
             requireCase(metric, actualCommitted == expectedCommitted, "transaction committed count mismatch")
         }
 
@@ -1045,15 +1113,19 @@ object StartupStabilityTestRunner {
                     duration = "03:33"
                 }
             }
-            val saveResult = timedStep(state, metric, "save_conflict_batch") {
+            val saveResult = timedStep(state, metric, "lp_save_all__conflict_batch") {
                 LitePalRuntime.withSilentErrorLog {
                     runCatching { songs.saveAll() }.getOrDefault(false)
                 }
             }
             metric.recordsWritten += songs.size
             requireCase(metric, !saveResult, "unique conflict should fail saveAll")
-            val songsCount = LitePal.where("name like ?", "${prefix}_song_%").count(Song::class.java)
-            val lyricsCount = LitePal.where("lyric like ?", "${prefix}_lyric_%").count(Song::class.java)
+            val songsCount = timedStep(state, metric, "lp_count__conflict_song_rows") {
+                LitePal.where("name like ?", "${prefix}_song_%").count(Song::class.java)
+            }
+            val lyricsCount = timedStep(state, metric, "lp_count__conflict_lyric_rows") {
+                LitePal.where("lyric like ?", "${prefix}_lyric_%").count(Song::class.java)
+            }
             requireCase(metric, songsCount == 0, "song rows should rollback to 0")
             requireCase(metric, lyricsCount == 0, "lyric rows should rollback to 0")
         }
@@ -1102,7 +1174,7 @@ object StartupStabilityTestRunner {
             val activeWriters = AtomicInteger(writerCoroutines)
 
             try {
-                timedStep(state, metric, "concurrent_run") {
+                timedStep(state, metric, "lp_concurrency__read_write_run") {
                     runBlocking {
                         withTimeout(totalTimeoutMs) {
                             coroutineScope {
@@ -1232,12 +1304,16 @@ object StartupStabilityTestRunner {
 
             requireCase(metric, errors.isEmpty(), "concurrent errors: ${errors.joinToString("; ") { it.message ?: "unknown" }}")
             val expected = writerCoroutines * writesPerCoroutine
-            val actual = LitePal.where("name like ?", "${prefix}_w%").count(Singer::class.java)
+            val actual = timedStep(state, metric, "lp_count__concurrency_verify") {
+                LitePal.where("name like ?", "${prefix}_w%").count(Singer::class.java)
+            }
             requireCase(metric, written.get() == expected, "writer counter mismatch")
             requireCase(metric, reads.get() == expectedReads, "reader loop count mismatch")
             requireCase(metric, actual == expected, "concurrent final count expected $expected but got $actual")
 
-            val names = LitePal.where("name like ?", "${prefix}_w%").find(Singer::class.java).mapNotNull { it.name }
+            val names = timedStep(state, metric, "lp_find__concurrency_names") {
+                LitePal.where("name like ?", "${prefix}_w%").find(Singer::class.java).mapNotNull { it.name }
+            }
             requireCase(metric, names.size == expected, "concurrent query result size mismatch")
             requireCase(metric, names.toSet().size == expected, "concurrent names should be unique")
             metric.recordsWritten += expected

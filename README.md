@@ -134,6 +134,39 @@ LitePal Pro 是一个 Kotlin-first 的 Android SQLite ORM。
 5. 支持取消与重跑：取消后保留已完成 Case，未开始 Case 保持 pending，并按 `runId` 进入历史环形缓冲。
 6. 异常路径保留完整 `stackTrace` 与 `rootCauseChain`，UI 与日志可双向追溯。
 
+#### 4.9 Sample 启动稳定性耗时快照（2026-04-06）
+- 统计口径：仅纳入 `totalCases=11 && passed=11 && failed=0 && cancelled=false` 的完整成功 run。
+- 日志来源：`sample-test/build/outputs/androidTest-results/connected/debug`。
+- 统计脚本：`python tools/startup_stability_timing_stats.py --input sample-test/build/outputs/androidTest-results/connected/debug --run-id latest_success`。
+- 采样 runId：`8cf78d9e-ecd4-44d5-98f5-2bfda053126f`。
+
+##### 4.9.1 各 Case 平均耗时（ms）
+| Case | 平均耗时(ms) |
+| --- | ---: |
+| save_association_basic | 4 |
+| query_aggregate_basic | 4 |
+| update_delete_basic | 3 |
+| transaction_commit_basic | 1 |
+| transaction_rollback_basic | 1 |
+| stress_bulk_insert_query | 136 |
+| stress_bulk_update_delete | 90 |
+| stress_association_high_volume | 654 |
+| stress_transaction_repeat | 92 |
+| stress_unique_conflict_rollback | 14 |
+| stress_concurrent_read_write | 225 |
+
+##### 4.9.2 核心方法平均耗时（ms）
+| 检查点 | 对应核心方法 | 平均耗时(ms) |
+| --- | --- | ---: |
+| save_songs | LitePal.saveAll（关联 songs 批量写入） | 482 |
+| concurrent_run | 并发读写混合执行流 | 214 |
+| save_albums | LitePal.saveAll（关联 albums 批量写入） | 89 |
+| bulk_save | LitePal.saveAll（批量插入） | 73 |
+| save_singers | LitePal.saveAll（关联 singers 批量写入） | 16 |
+| bulk_count | LitePal.count（批量校验） | 4 |
+| load_album_eager | LitePal.find（eager 关联加载） | 1 |
+| save_conflict_batch | LitePal.saveAll（冲突回滚路径） | 1 |
+
 ### 5. 核心原理（Core Principles，中文）
 
 1. **生成式元数据是单一真值（Single Source of Truth）**  
@@ -416,13 +449,13 @@ LitePal.setCryptoPolicy(LitePalCryptoPolicy.V2_WRITE_DUAL_READ)
 #### 6.13 运行时指标与观测
 ```kotlin
 val generatedHits = LitePal.getGeneratedPathHitCount()
-val fallbackHits = LitePal.getReflectionFallbackCount()
+val contractViolationHits = LitePal.getGeneratedContractViolationCount()
 val mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs()
 LitePal.resetRuntimeMetrics()
 ```
 
 说明：
-- 4.x 主链设计为 generated-only，`fallbackHits` 理想值应长期接近 `0`。
+- 4.x 主链设计为 generated-only，`contractViolationHits` 理想值应长期接近 `0`。
 
 #### 6.14 3.x -> 4.x 迁移要点
 - 旧 async API（如 `findAsync/countAsync`）已移除。
@@ -483,6 +516,13 @@ adb shell am start -n org.litepal.litepalsample/.activity.MainActivity
 ./gradlew :sample-test:connectedDebugAndroidTest \
   "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.sampletest.suite.dashboard_orchestration.DashboardOrchestrationSuite" \
   --stacktrace
+
+# Sample 启动稳定性耗时统计（只取完整成功 run）
+python tools/startup_stability_timing_stats.py \
+  --input sample-test/build/outputs/androidTest-results/connected/debug \
+  --run-id latest_success \
+  --output-json build/reports/startup-stability-timing.json \
+  --output-markdown build/reports/startup-stability-timing.md
 
 # 核心 instrumentation
 ./gradlew :core:connectedDebugAndroidTest --stacktrace
@@ -622,6 +662,39 @@ In the 4.x line, the architecture is intentionally **generated-metadata-first**:
 4. Long-running case elapsed time is refreshed every second (`delay(1000)` ticker).
 5. Cancel/re-run semantics preserve completed results, keep unstarted cases as pending, and isolate history by `runId`.
 6. Failure paths persist full `stackTrace` + `rootCauseChain` for UI/log traceability.
+
+#### 4.9 Sample Startup Timing Snapshot (2026-04-06)
+- Scope: only runs with `totalCases=11 && passed=11 && failed=0 && cancelled=false`.
+- Log source: `sample-test/build/outputs/androidTest-results/connected/debug`.
+- Script: `python tools/startup_stability_timing_stats.py --input sample-test/build/outputs/androidTest-results/connected/debug --run-id latest_success`.
+- Sample runId: `8cf78d9e-ecd4-44d5-98f5-2bfda053126f`.
+
+##### 4.9.1 Case Average Cost (ms)
+| Case | Avg(ms) |
+| --- | ---: |
+| save_association_basic | 4 |
+| query_aggregate_basic | 4 |
+| update_delete_basic | 3 |
+| transaction_commit_basic | 1 |
+| transaction_rollback_basic | 1 |
+| stress_bulk_insert_query | 136 |
+| stress_bulk_update_delete | 90 |
+| stress_association_high_volume | 654 |
+| stress_transaction_repeat | 92 |
+| stress_unique_conflict_rollback | 14 |
+| stress_concurrent_read_write | 225 |
+
+##### 4.9.2 Core Method Average Cost (ms)
+| Checkpoint | Core Method | Avg(ms) |
+| --- | --- | ---: |
+| save_songs | LitePal.saveAll (association songs batch) | 482 |
+| concurrent_run | Concurrent mixed read/write flow | 214 |
+| save_albums | LitePal.saveAll (association albums batch) | 89 |
+| bulk_save | LitePal.saveAll (bulk insert) | 73 |
+| save_singers | LitePal.saveAll (association singers batch) | 16 |
+| bulk_count | LitePal.count (bulk verification) | 4 |
+| load_album_eager | LitePal.find (eager relation load) | 1 |
+| save_conflict_batch | LitePal.saveAll (conflict rollback path) | 1 |
 
 ### 5. Core Principles (English)
 
@@ -791,7 +864,7 @@ LitePal.setCryptoPolicy(LitePalCryptoPolicy.V2_WRITE_DUAL_READ)
 #### 6.13 Runtime Metrics
 ```kotlin
 val generatedHits = LitePal.getGeneratedPathHitCount()
-val fallbackHits = LitePal.getReflectionFallbackCount()
+val contractViolationHits = LitePal.getGeneratedContractViolationCount()
 val mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs()
 LitePal.resetRuntimeMetrics()
 ```
@@ -839,6 +912,13 @@ adb shell am start -n org.litepal.litepalsample/.activity.MainActivity
 ./gradlew :sample-test:connectedDebugAndroidTest \
   "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.sampletest.suite.dashboard_orchestration.DashboardOrchestrationSuite" \
   --stacktrace
+
+# Startup stability timing aggregation (full-success runs only)
+python tools/startup_stability_timing_stats.py \
+  --input sample-test/build/outputs/androidTest-results/connected/debug \
+  --run-id latest_success \
+  --output-json build/reports/startup-stability-timing.json \
+  --output-markdown build/reports/startup-stability-timing.md
 
 # Core instrumentation
 ./gradlew :core:connectedDebugAndroidTest --stacktrace

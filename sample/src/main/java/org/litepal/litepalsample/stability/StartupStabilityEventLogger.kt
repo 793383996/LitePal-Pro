@@ -25,6 +25,7 @@ internal class StartupStabilityEventLogger(
     }
 
     fun logRun(metric: StartupStabilityTestRunner.RunMetric) {
+        val methodTimingBuckets = linkedMapOf<String, MutableList<Long>>()
         Log.i(
             TAG,
             "RUN_START|runId=${metric.runId}|timestamp=${metric.startEpochMs}|buildType=${metric.buildType}|thread=${Thread.currentThread().name}|stressLevel=${metric.stressLevel}"
@@ -50,6 +51,26 @@ internal class StartupStabilityEventLogger(
             } else {
                 Log.i(TAG, base.toString())
             }
+
+            for (checkpoint in caseMetric.checkpoints) {
+                val method = deriveMethodKey(checkpoint.name)
+                methodTimingBuckets.getOrPut(method) { mutableListOf() }.add(checkpoint.costMs)
+                Log.i(
+                    TAG,
+                    "CHECKPOINT_TIMING|runId=${metric.runId}|caseName=${caseMetric.caseName}|checkpoint=${sanitize(checkpoint.name)}|method=$method|costMs=${checkpoint.costMs}"
+                )
+            }
+        }
+
+        for ((method, costs) in methodTimingBuckets) {
+            val total = costs.sum()
+            val avg = if (costs.isEmpty()) 0L else total / costs.size
+            val min = costs.minOrNull() ?: 0L
+            val max = costs.maxOrNull() ?: 0L
+            Log.i(
+                TAG,
+                "METHOD_SUMMARY|runId=${metric.runId}|method=$method|samples=${costs.size}|avgMs=$avg|minMs=$min|maxMs=$max|totalMs=$total"
+            )
         }
 
         Log.i(
@@ -81,6 +102,12 @@ internal class StartupStabilityEventLogger(
 
     private fun sanitize(text: String): String {
         return text.replace("|", "/").replace('\n', ' ').replace('\r', ' ')
+    }
+
+    private fun deriveMethodKey(checkpointName: String): String {
+        val separator = checkpointName.indexOf("__")
+        val raw = if (separator > 0) checkpointName.substring(0, separator) else checkpointName
+        return sanitize(raw)
     }
 
     private companion object {
