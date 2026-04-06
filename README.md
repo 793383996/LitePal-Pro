@@ -32,9 +32,38 @@ LitePal Pro 是一个 Kotlin-first 的 Android SQLite ORM。
 - `compiler-common`: 编译器共享模型与代码渲染逻辑
 - `compiler-ksp`: KSP 处理器实现
 - `compiler-kapt`: KAPT 处理器实现
-- `sample`: Android 示例应用（Compose + KSP 接线 + 启动稳定性样例）
+- `sample`: Android 示例应用（Compose + KSP 接线 + 自动 Full 稳定性测试入口）
+- `sample-test`: 独立 instrumentation 测试模块（8 套件门禁 + 统一运行入口）
 - `fixture-*`: 处理器一致性与负例验证工程（KSP/KAPT parity、编译期报错断言）
 - `compat-3x-*`: 3.x 迁移辅助目录（维护态；默认不在 `settings.gradle` 主构建图中）
+
+### 3.1 Sample 最新架构（App/Test 双模块拆分）
+
+1. `sample`（应用演示模块）
+   - `MyApplication` 仅负责 LitePal 初始化与运行时策略，不直接执行压测。
+   - `MainActivity` 使用双 ViewModel：`SampleDataViewModel`（演示数据流）+ `TestDashboardViewModel`（测试任务流）。
+   - Activity `onCreate` 自动触发一次 Full 套件：`startAutoFullRunIfNeeded()`。
+   - 首页第一个子项为测试任务模块，展示进度、当前 Case、已完成/待处理、失败堆栈、历史任务。
+   - UI 已按功能拆分：`SampleComposeApp`（壳层）+ `Home/Crud/Aggregate/Table/Diagnostics` 独立 Screen 文件。
+   - 稳定性执行器已拆分：`StartupStabilityTestRunner` + `RunnerCore` + `CaseCatalog` + `EventLogger`。
+
+2. `sample-test`（独立门禁模块）
+   - `sample/src/androidTest` 已迁空，测试资产迁移到 `sample-test/src/androidTest`。
+   - 默认 instrumentation 入口固定为 `org.litepal.sampletest.suite.SampleTestAllSuites`。
+   - 套件分层固定为 8 组：
+     - `boot_open`
+     - `crud_relation`
+     - `transaction_concurrency`
+     - `multi_db_epoch`
+     - `listener_preload`
+     - `schema_migration_validation`
+     - `dashboard_orchestration`
+     - `stress_full`
+   - `SampleTestRuntimeBootstrap` 统一测试运行时策略，测试 Manifest 移除 `androidx.startup.InitializationProvider` 避免进程初始化冲突。
+
+3. 根任务与 CI 门禁
+   - 根任务 `sampleTestAll`：串联 `:sample:assembleDebug -> :sample:installDebug -> :sample-test:connectedDebugAndroidTest`。
+   - GitHub Actions `sample-pr-gate.yml` 在 PR/Push 场景运行 `sampleTestAll`，形成 `sample + sample-test` 独立门禁。
 
 ### 4. 核心流程（Core Flow，中文）
 
@@ -96,6 +125,14 @@ LitePal Pro 是一个 Kotlin-first 的 Android SQLite ORM。
   - `registerDatabaseListener(listener)`（手动反注册）
   - `registerDatabaseListener(owner, listener)`（`LifecycleOwner` 自动反注册）
 - `preloadDatabase` 以 epoch 去重，提前异步触发开库，降低主线程首开阻塞风险。
+
+#### 4.8 Sample 自动测试编排链路（最新）
+1. `MainActivity` 启动后由 `TestDashboardViewModel` 自动发起 `runSuite(HIGH)`。
+2. 执行器事件统一收敛为 `RunStarted/CaseStarted/Checkpoint/CasePassed/CaseFailed/RunCancelled/RunFinished/RunCrashed`。
+3. Dashboard 状态由 `StateFlow<TestDashboardUiState>` 维护，UI 只订阅状态不执行业务逻辑。
+4. 长任务计时通过每秒 ticker 刷新（`delay(1000)`），并回写当前 Case 耗时。
+5. 支持取消与重跑：取消后保留已完成 Case，未开始 Case 保持 pending，并按 `runId` 进入历史环形缓冲。
+6. 异常路径保留完整 `stackTrace` 与 `rootCauseChain`，UI 与日志可双向追溯。
 
 ### 5. 核心原理（Core Principles，中文）
 
@@ -419,7 +456,7 @@ LitePal.resetRuntimeMetrics()
 ### 7. 开发与验证命令
 
 ```bash
-# PR Gate 级别组合验证
+# PR Gate 级别组合验证（core/compiler）
 ./gradlew \
   :compiler-common:test \
   :core:assembleDebug \
@@ -432,6 +469,20 @@ LitePal.resetRuntimeMetrics()
 
 # 示例应用（包含 generated registry 校验）
 ./gradlew :sample:assembleDebug
+./gradlew :sample:installDebug
+adb shell am start -n org.litepal.litepalsample/.activity.MainActivity
+
+# sample-test 全量 instrumentation（默认执行 SampleTestAllSuites）
+./gradlew :sample-test:assembleDebugAndroidTest
+./gradlew :sample-test:connectedDebugAndroidTest --stacktrace
+
+# 根任务一键执行 sample + sample-test 门禁
+./gradlew sampleTestAll --stacktrace
+
+# 单套件定向执行示例（Dashboard 编排）
+./gradlew :sample-test:connectedDebugAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.sampletest.suite.dashboard_orchestration.DashboardOrchestrationSuite" \
+  --stacktrace
 
 # 核心 instrumentation
 ./gradlew :core:connectedDebugAndroidTest --stacktrace
@@ -476,9 +527,38 @@ In the 4.x line, the architecture is intentionally **generated-metadata-first**:
 - `compiler-common`: shared compiler model + rendering
 - `compiler-ksp`: KSP processor implementation
 - `compiler-kapt`: KAPT processor implementation
-- `sample`: Android sample app (Compose + KSP wiring + startup stability sample)
+- `sample`: Android sample app (Compose + KSP wiring + auto Full stability entry)
+- `sample-test`: dedicated instrumentation module (8-suite gate + unified runner entry)
 - `fixture-*`: processor parity/negative-case verification fixtures
 - `compat-3x-*`: migration helper directories (maintenance only, not in default `settings.gradle` graph)
+
+### 3.1 Latest Sample Architecture (App/Test Split)
+
+1. `sample` (app demo module)
+   - `MyApplication` only initializes LitePal runtime policies; it no longer runs stress tests directly.
+   - `MainActivity` binds two ViewModels: `SampleDataViewModel` (demo data flow) + `TestDashboardViewModel` (test task flow).
+   - Activity auto-triggers one Full suite on startup via `startAutoFullRunIfNeeded()`.
+   - Home first item is the dashboard card: progress/current case/completed-pending/error stack/history.
+   - UI is split by feature: `SampleComposeApp` shell + dedicated `Home/Crud/Aggregate/Table/Diagnostics` screens.
+   - Stability executor boundaries are split into `StartupStabilityTestRunner` + `RunnerCore` + `CaseCatalog` + `EventLogger`.
+
+2. `sample-test` (independent test gate module)
+   - `sample/src/androidTest` is emptied; instrumentation assets are moved to `sample-test/src/androidTest`.
+   - Default instrumentation class is fixed to `org.litepal.sampletest.suite.SampleTestAllSuites`.
+   - Test suite taxonomy is locked to 8 groups:
+     - `boot_open`
+     - `crud_relation`
+     - `transaction_concurrency`
+     - `multi_db_epoch`
+     - `listener_preload`
+     - `schema_migration_validation`
+     - `dashboard_orchestration`
+     - `stress_full`
+   - `SampleTestRuntimeBootstrap` unifies runtime options for tests; test manifest removes `androidx.startup.InitializationProvider` to avoid startup conflicts.
+
+3. Root task and CI gate
+   - Root task `sampleTestAll` chains `:sample:assembleDebug -> :sample:installDebug -> :sample-test:connectedDebugAndroidTest`.
+   - GitHub workflow `sample-pr-gate.yml` runs `sampleTestAll` on PR/Push to enforce a dedicated sample gate.
 
 ### 4. Core Flow (English)
 
@@ -534,6 +614,14 @@ In the 4.x line, the architecture is intentionally **generated-metadata-first**:
 #### 4.7 Listeners and Preload
 - Listener registration supports manual and lifecycle-bound modes.
 - `preloadDatabase` de-duplicates by epoch and helps reduce first synchronous open cost.
+
+#### 4.8 Sample Auto-Test Orchestration Flow
+1. After `MainActivity` starts, `TestDashboardViewModel` launches `runSuite(HIGH)` automatically.
+2. Runner events are normalized as `RunStarted/CaseStarted/Checkpoint/CasePassed/CaseFailed/RunCancelled/RunFinished/RunCrashed`.
+3. Dashboard state is reduced into `StateFlow<TestDashboardUiState>`; UI remains subscriber-only.
+4. Long-running case elapsed time is refreshed every second (`delay(1000)` ticker).
+5. Cancel/re-run semantics preserve completed results, keep unstarted cases as pending, and isolate history by `runId`.
+6. Failure paths persist full `stackTrace` + `rootCauseChain` for UI/log traceability.
 
 ### 5. Core Principles (English)
 
@@ -724,6 +812,7 @@ Typical errors and fixes:
 ### 7. Build and Verification Commands
 
 ```bash
+# Core/compiler gate
 ./gradlew \
   :compiler-common:test \
   :core:assembleDebug \
@@ -734,7 +823,24 @@ Typical errors and fixes:
   verifyProcessorNegativeCases \
   :core:publishReleasePublicationToMavenLocal
 
+# Sample app build/install/start
 ./gradlew :sample:assembleDebug
+./gradlew :sample:installDebug
+adb shell am start -n org.litepal.litepalsample/.activity.MainActivity
+
+# sample-test full instrumentation (default class = SampleTestAllSuites)
+./gradlew :sample-test:assembleDebugAndroidTest
+./gradlew :sample-test:connectedDebugAndroidTest --stacktrace
+
+# One-shot sample gate task
+./gradlew sampleTestAll --stacktrace
+
+# Run a single suite (example: dashboard orchestration)
+./gradlew :sample-test:connectedDebugAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=org.litepal.sampletest.suite.dashboard_orchestration.DashboardOrchestrationSuite" \
+  --stacktrace
+
+# Core instrumentation
 ./gradlew :core:connectedDebugAndroidTest --stacktrace
 ```
 
