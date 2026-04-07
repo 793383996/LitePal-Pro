@@ -23,6 +23,7 @@ import org.litepal.LitePalApplication
 import org.litepal.Operator
 import org.litepal.parser.LitePalAttr
 import org.litepal.util.SharedUtil
+import org.litepal.util.LitePalLog
 
 /**
  * Database helper used by LitePal.
@@ -34,12 +35,26 @@ class LitePalOpenHelper(
     version: Int
 ) : SQLiteOpenHelper(context, name, factory, version) {
 
+    companion object {
+        private const val TAG = "LitePalOpenHelper"
+    }
+
     constructor(dbName: String, version: Int) : this(
         LitePalApplication.getContext(),
         dbName,
         null,
         version
     )
+
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        db.setForeignKeyConstraintsEnabled(true)
+        runCatching {
+            db.enableWriteAheadLogging()
+        }.onFailure { error ->
+            LitePalLog.w(TAG, "Enable WAL failed, fallback to default journal mode: ${error.message}")
+        }
+    }
 
     override fun onCreate(db: SQLiteDatabase) {
         Generator.create(db)

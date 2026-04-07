@@ -8,13 +8,22 @@ import org.litepal.LitePalRuntimeOptions
 import org.litepal.MainThreadViolationPolicy
 import org.litepal.SchemaValidationMode
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 class MyApplication : Application() {
-    private val queryExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "litepal-sample-query").apply { isDaemon = true }
+    companion object {
+        private val queryThreadCounter = AtomicInteger(0)
+        private val transactionThreadCounter = AtomicInteger(0)
+        private val queryThreadCount = Runtime.getRuntime()
+            .availableProcessors()
+            .coerceIn(2, 4)
+    }
+
+    private val queryExecutor = Executors.newFixedThreadPool(queryThreadCount) { runnable ->
+        Thread(runnable, "litepal-sample-query-${queryThreadCounter.incrementAndGet()}").apply { isDaemon = true }
     }
     private val transactionExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "litepal-sample-transaction").apply { isDaemon = true }
+        Thread(runnable, "litepal-sample-transaction-${transactionThreadCounter.incrementAndGet()}").apply { isDaemon = true }
     }
 
     override fun onCreate() {

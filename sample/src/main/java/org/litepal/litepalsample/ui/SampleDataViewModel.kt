@@ -2,6 +2,7 @@ package org.litepal.litepalsample.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,7 +83,9 @@ class SampleDataViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(SampleDataUiState())
     val uiState: StateFlow<SampleDataUiState> = _uiState.asStateFlow()
     private val loadingRefCount = AtomicInteger(0)
+    @Volatile
     private var listenerRegistered = false
+    @Volatile
     private var preloadStatus = "idle"
 
     private val databaseListener = object : DatabaseListener {
@@ -107,19 +110,7 @@ class SampleDataViewModel : ViewModel() {
 
     fun refreshSingers() {
         runDb("Load singers") {
-            val singers = LitePal.order("id desc").limit(50).find(Singer::class.java)
-            _uiState.update { current ->
-                current.copy(
-                    singers = singers.map { singer ->
-                        SingerRow(
-                            id = singer.id,
-                            name = singer.name.orEmpty(),
-                            age = singer.age,
-                            isMale = singer.isMale
-                        )
-                    }
-                )
-            }
+            loadSingersIntoState()
         }
     }
 
@@ -131,76 +122,39 @@ class SampleDataViewModel : ViewModel() {
                 this.isMale = isMale
             }
             singer.save()
-            refreshSingers()
-            refreshAggregate()
-            refreshDiagnostics()
+            loadSingersIntoState()
+            loadAggregateIntoState()
+            loadDiagnosticsIntoState()
         }
     }
 
     fun updateSingerAge(id: Long, age: Int) {
         runDb("Update singer") {
             Singer().apply { this.age = age }.update(id)
-            refreshSingers()
-            refreshAggregate()
-            refreshDiagnostics()
+            loadSingersIntoState()
+            loadAggregateIntoState()
+            loadDiagnosticsIntoState()
         }
     }
 
     fun deleteSinger(id: Long) {
         runDb("Delete singer") {
             LitePal.delete(Singer::class.java, id)
-            refreshSingers()
-            refreshAggregate()
-            refreshDiagnostics()
+            loadSingersIntoState()
+            loadAggregateIntoState()
+            loadDiagnosticsIntoState()
         }
     }
 
     fun refreshAggregate(prefix: String = "") {
         runDb("Aggregate") {
-            val likeArg = if (prefix.isBlank()) null else "${prefix}%"
-            val count = if (likeArg == null) {
-                LitePal.count(Singer::class.java)
-            } else {
-                LitePal.where("name like ?", likeArg).count(Singer::class.java)
-            }
-            val max = when {
-                count == 0 -> 0
-                likeArg == null -> LitePal.max(Singer::class.java, "age", Int::class.java)
-                else -> LitePal.where("name like ?", likeArg).max(Singer::class.java, "age", Int::class.java)
-            }
-            val min = when {
-                count == 0 -> 0
-                likeArg == null -> LitePal.min(Singer::class.java, "age", Int::class.java)
-                else -> LitePal.where("name like ?", likeArg).min(Singer::class.java, "age", Int::class.java)
-            }
-            val sum = when {
-                count == 0 -> 0
-                likeArg == null -> LitePal.sum(Singer::class.java, "age", Int::class.java)
-                else -> LitePal.where("name like ?", likeArg).sum(Singer::class.java, "age", Int::class.java)
-            }
-            val avg = when {
-                count == 0 -> 0.0
-                likeArg == null -> LitePal.average(Singer::class.java, "age")
-                else -> LitePal.where("name like ?", likeArg).average(Singer::class.java, "age")
-            }
-            _uiState.update { current ->
-                current.copy(
-                    aggregateSummary = AggregateSummary(
-                        count = count,
-                        max = max,
-                        min = min,
-                        sum = sum,
-                        avg = avg
-                    )
-                )
-            }
+            loadAggregateIntoState(prefix)
         }
     }
 
     fun refreshTableNames() {
         runDb("Load tables") {
-            val names = DBUtility.findAllTableNames(LitePal.getDatabase()).sorted()
-            _uiState.update { current -> current.copy(tableNames = names) }
+            loadTableNamesIntoState()
         }
     }
 
@@ -210,50 +164,27 @@ class SampleDataViewModel : ViewModel() {
     }
 
     fun refreshSelectedTableStructure() {
-        val tableName = _uiState.value.selectedTable ?: return
+        val tableName = _uiState.value.selectedTable
+        if (tableName.isNullOrBlank()) {
+            _uiState.update { current -> current.copy(selectedTableColumns = emptyList()) }
+            return
+        }
         runDb("Load table structure") {
-            val tableModel = DBUtility.findPragmaTableInfo(tableName, LitePal.getDatabase())
-            val columns = tableModel.getColumnModels().map { column ->
-                TableColumnRow(
-                    name = column.getColumnName().orEmpty(),
-                    type = column.getColumnType().orEmpty(),
-                    nullable = column.isNullable(),
-                    unique = column.isUnique(),
-                    indexed = column.hasIndex(),
-                    defaultValue = column.getDefaultValue().orEmpty()
-                )
-            }
-            _uiState.update { current -> current.copy(selectedTableColumns = columns) }
+            loadSelectedTableStructureIntoState(tableName)
         }
     }
 
     fun refreshDiagnostics() {
         runDb("Diagnostics") {
-            val options = LitePal.getRuntimeOptions()
-            val activePath = runCatching { LitePal.getDatabase().path }.getOrElse { "unavailable" }
-            _uiState.update { current ->
-                current.copy(
-                    diagnosticsSummary = DiagnosticsSummary(
-                        generatedHitCount = LitePal.getGeneratedPathHitCount(),
-                        generatedContractViolationCount = LitePal.getGeneratedContractViolationCount(),
-                        mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs(),
-                        runtimeOptions = options.toString(),
-                        errorPolicy = LitePalRuntime.getErrorPolicy().name,
-                        cryptoPolicy = LitePalRuntime.getCryptoPolicy().name,
-                        schemaValidationMode = options.schemaValidationMode.name,
-                        activeDatabasePath = activePath,
-                        preloadStatus = preloadStatus,
-                        listenerRegistered = listenerRegistered,
-                        eventLog = current.diagnosticsSummary.eventLog
-                    )
-                )
-            }
+            loadDiagnosticsIntoState()
         }
     }
 
     fun resetDiagnostics() {
-        LitePal.resetRuntimeMetrics()
-        refreshDiagnostics()
+        runDb("Reset diagnostics") {
+            LitePal.resetRuntimeMetrics()
+            loadDiagnosticsIntoState()
+        }
     }
 
     fun preloadDatabase() {
@@ -264,7 +195,9 @@ class SampleDataViewModel : ViewModel() {
             override fun onSuccess(path: String) {
                 preloadStatus = "success"
                 appendEvent("Database preload success: $path")
-                refreshDiagnostics()
+                runDb("Diagnostics") {
+                    loadDiagnosticsIntoState()
+                }
             }
 
             override fun onError(throwable: Throwable) {
@@ -273,7 +206,9 @@ class SampleDataViewModel : ViewModel() {
                 _uiState.update { current ->
                     current.copy(message = "Preload failed: ${throwable.message.orEmpty()}")
                 }
-                refreshDiagnostics()
+                runDb("Diagnostics") {
+                    loadDiagnosticsIntoState()
+                }
             }
         })
     }
@@ -283,7 +218,7 @@ class SampleDataViewModel : ViewModel() {
             LitePal.setErrorPolicy(LitePalErrorPolicy.STRICT)
             LitePal.setCryptoPolicy(LitePalCryptoPolicy.V2_WRITE_DUAL_READ)
             appendEvent("Runtime policy switched to STRICT + V2_WRITE_DUAL_READ")
-            refreshDiagnostics()
+            loadDiagnosticsIntoState()
         }
     }
 
@@ -292,7 +227,7 @@ class SampleDataViewModel : ViewModel() {
             LitePal.setErrorPolicy(LitePalErrorPolicy.COMPAT)
             LitePal.setCryptoPolicy(LitePalCryptoPolicy.LEGACY_WRITE_LEGACY_READ)
             appendEvent("Runtime policy switched to COMPAT + LEGACY_WRITE_LEGACY_READ")
-            refreshDiagnostics()
+            loadDiagnosticsIntoState()
         }
     }
 
@@ -301,7 +236,7 @@ class SampleDataViewModel : ViewModel() {
             val options = LitePal.getRuntimeOptions().copy(schemaValidationMode = mode)
             LitePal.setRuntimeOptions(options)
             appendEvent("Schema validation mode changed to ${mode.name}")
-            refreshDiagnostics()
+            loadDiagnosticsIntoState()
         }
     }
 
@@ -309,13 +244,13 @@ class SampleDataViewModel : ViewModel() {
         runDb("Register database listener") {
             if (listenerRegistered) {
                 appendEvent("Database listener already registered")
-                refreshDiagnostics()
+                loadDiagnosticsIntoState()
                 return@runDb
             }
             LitePal.registerDatabaseListener(databaseListener)
             listenerRegistered = true
             appendEvent("Database listener registered")
-            refreshDiagnostics()
+            loadDiagnosticsIntoState()
         }
     }
 
@@ -324,7 +259,7 @@ class SampleDataViewModel : ViewModel() {
             LitePal.unregisterDatabaseListener()
             listenerRegistered = false
             appendEvent("Database listener unregistered")
-            refreshDiagnostics()
+            loadDiagnosticsIntoState()
         }
     }
 
@@ -333,7 +268,7 @@ class SampleDataViewModel : ViewModel() {
             LitePal.use(LitePalDB.fromDefault(SANDBOX_DB_NAME))
             LitePal.getDatabase()
             appendEvent("Using sandbox database: $SANDBOX_DB_NAME")
-            refreshDataAfterDatabaseChange()
+            refreshDataAfterDatabaseChangeInCurrentTask()
         }
     }
 
@@ -342,7 +277,7 @@ class SampleDataViewModel : ViewModel() {
             LitePal.useDefault()
             LitePal.getDatabase()
             appendEvent("Switched to default database")
-            refreshDataAfterDatabaseChange()
+            refreshDataAfterDatabaseChangeInCurrentTask()
         }
     }
 
@@ -355,7 +290,7 @@ class SampleDataViewModel : ViewModel() {
             } else {
                 appendEvent("Sandbox database not deleted (not found or busy): $SANDBOX_DB_NAME")
             }
-            refreshDataAfterDatabaseChange()
+            refreshDataAfterDatabaseChangeInCurrentTask()
         }
     }
 
@@ -371,12 +306,123 @@ class SampleDataViewModel : ViewModel() {
         super.onCleared()
     }
 
-    private fun refreshDataAfterDatabaseChange() {
-        refreshSingers()
-        refreshAggregate()
-        refreshTableNames()
-        refreshSelectedTableStructure()
-        refreshDiagnostics()
+    private fun loadSingersIntoState() {
+        val singers = LitePal.order("id desc").limit(50).find(Singer::class.java)
+        _uiState.update { current ->
+            current.copy(
+                singers = singers.map { singer ->
+                    SingerRow(
+                        id = singer.id,
+                        name = singer.name.orEmpty(),
+                        age = singer.age,
+                        isMale = singer.isMale
+                    )
+                }
+            )
+        }
+    }
+
+    private fun loadAggregateIntoState(prefix: String = "") {
+        val likeArg = if (prefix.isBlank()) null else "${prefix}%"
+        val count = if (likeArg == null) {
+            LitePal.count(Singer::class.java)
+        } else {
+            LitePal.where("name like ?", likeArg).count(Singer::class.java)
+        }
+        val max = when {
+            count == 0 -> 0
+            likeArg == null -> LitePal.max(Singer::class.java, "age", Int::class.java)
+            else -> LitePal.where("name like ?", likeArg).max(Singer::class.java, "age", Int::class.java)
+        }
+        val min = when {
+            count == 0 -> 0
+            likeArg == null -> LitePal.min(Singer::class.java, "age", Int::class.java)
+            else -> LitePal.where("name like ?", likeArg).min(Singer::class.java, "age", Int::class.java)
+        }
+        val sum = when {
+            count == 0 -> 0
+            likeArg == null -> LitePal.sum(Singer::class.java, "age", Int::class.java)
+            else -> LitePal.where("name like ?", likeArg).sum(Singer::class.java, "age", Int::class.java)
+        }
+        val avg = when {
+            count == 0 -> 0.0
+            likeArg == null -> LitePal.average(Singer::class.java, "age")
+            else -> LitePal.where("name like ?", likeArg).average(Singer::class.java, "age")
+        }
+        _uiState.update { current ->
+            current.copy(
+                aggregateSummary = AggregateSummary(
+                    count = count,
+                    max = max,
+                    min = min,
+                    sum = sum,
+                    avg = avg
+                )
+            )
+        }
+    }
+
+    private fun loadTableNamesIntoState() {
+        val names = DBUtility.findAllTableNames(LitePal.getDatabase()).sorted()
+        _uiState.update { current -> current.copy(tableNames = names) }
+    }
+
+    private fun loadSelectedTableStructureIntoState(tableName: String) {
+        val tableModel = DBUtility.findPragmaTableInfo(tableName, LitePal.getDatabase())
+        val columns = tableModel.getColumnModels().map { column ->
+            TableColumnRow(
+                name = column.getColumnName().orEmpty(),
+                type = column.getColumnType().orEmpty(),
+                nullable = column.isNullable(),
+                unique = column.isUnique(),
+                indexed = column.hasIndex(),
+                defaultValue = column.getDefaultValue().orEmpty()
+            )
+        }
+        _uiState.update { current -> current.copy(selectedTableColumns = columns) }
+    }
+
+    private fun loadDiagnosticsIntoState() {
+        val options = LitePal.getRuntimeOptions()
+        val activePath = runCatching { LitePal.getDatabase().path }.getOrElse { "unavailable" }
+        _uiState.update { current ->
+            current.copy(
+                diagnosticsSummary = DiagnosticsSummary(
+                    generatedHitCount = LitePal.getGeneratedPathHitCount(),
+                    generatedContractViolationCount = LitePal.getGeneratedContractViolationCount(),
+                    mainThreadBlockMs = LitePal.getMainThreadDbBlockTotalMs(),
+                    runtimeOptions = options.toString(),
+                    errorPolicy = LitePalRuntime.getErrorPolicy().name,
+                    cryptoPolicy = LitePalRuntime.getCryptoPolicy().name,
+                    schemaValidationMode = options.schemaValidationMode.name,
+                    activeDatabasePath = activePath,
+                    preloadStatus = preloadStatus,
+                    listenerRegistered = listenerRegistered,
+                    eventLog = current.diagnosticsSummary.eventLog
+                )
+            )
+        }
+    }
+
+    private fun refreshDataAfterDatabaseChangeInCurrentTask() {
+        loadSingersIntoState()
+        loadAggregateIntoState()
+        loadTableNamesIntoState()
+        val selectedTable = _uiState.value.selectedTable
+        val tableNames = _uiState.value.tableNames
+        if (selectedTable.isNullOrBlank()) {
+            _uiState.update { current -> current.copy(selectedTableColumns = emptyList()) }
+        } else if (tableNames.contains(selectedTable)) {
+            loadSelectedTableStructureIntoState(selectedTable)
+        } else {
+            _uiState.update { current ->
+                current.copy(
+                    selectedTable = null,
+                    selectedTableColumns = emptyList()
+                )
+            }
+        }
+        loadDiagnosticsIntoState()
     }
 
     private fun appendEvent(message: String) {
@@ -398,17 +444,21 @@ class SampleDataViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val loading = loadingRefCount.incrementAndGet()
             _uiState.update { current -> current.copy(loading = loading > 0) }
-            runCatching { block() }
-                .onFailure { error ->
-                    _uiState.update { current ->
-                        current.copy(message = "$operation failed: ${error.message.orEmpty()}")
-                    }
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                _uiState.update { current ->
+                    current.copy(message = "$operation failed: ${error.message.orEmpty()}")
                 }
-            val after = loadingRefCount.decrementAndGet().coerceAtLeast(0)
-            if (after == 0) {
-                loadingRefCount.set(0)
+            } finally {
+                val after = loadingRefCount.decrementAndGet().coerceAtLeast(0)
+                if (after == 0) {
+                    loadingRefCount.set(0)
+                }
+                _uiState.update { current -> current.copy(loading = after > 0) }
             }
-            _uiState.update { current -> current.copy(loading = after > 0) }
         }
     }
 }

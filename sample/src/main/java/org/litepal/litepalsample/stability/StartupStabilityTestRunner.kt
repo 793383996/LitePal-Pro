@@ -1133,29 +1133,32 @@ object StartupStabilityTestRunner {
         private fun caseStressConcurrentReadWrite(state: RunState, metric: MutableCaseMetric) {
             val prefix = state.casePrefix("stress_concurrent_read_write")
             val runtimeOptions = LitePalRuntime.getRuntimeOptions()
-            val serialExecutorMode = isLikelySingleThreadExecutor(runtimeOptions.queryExecutor) &&
-                isLikelySingleThreadExecutor(runtimeOptions.transactionExecutor)
+            val queryParallelism = resolveExecutorParallelism(runtimeOptions.queryExecutor)
+            val transactionParallelism = resolveExecutorParallelism(runtimeOptions.transactionExecutor)
+            val writeConstrainedMode = transactionParallelism <= 1
+            val readConstrainedMode = queryParallelism <= 2
+            val constrainedMode = writeConstrainedMode || readConstrainedMode
 
-            // 针对 sample 的单线程执行器场景做自适应降载，避免“并发意图 -> 队列拥塞 -> 固定超时”。
-            val writerCoroutines = if (serialExecutorMode) {
-                state.profile.concurrentWriterThreads.coerceAtMost(3).coerceAtLeast(2)
-            } else {
-                state.profile.concurrentWriterThreads
+            // 低并发执行器下自适应缩放压力参数，避免固定 30s 超时误判；高并发执行器保持原始强度。
+            val writerCoroutines = when {
+                writeConstrainedMode -> state.profile.concurrentWriterThreads.coerceAtMost(4).coerceAtLeast(2)
+                constrainedMode -> state.profile.concurrentWriterThreads.coerceAtMost(8).coerceAtLeast(4)
+                else -> state.profile.concurrentWriterThreads
             }
-            val readerCoroutines = if (serialExecutorMode) {
-                state.profile.concurrentReaderThreads.coerceAtMost(2).coerceAtLeast(1)
-            } else {
-                state.profile.concurrentReaderThreads
+            val readerCoroutines = when {
+                readConstrainedMode -> state.profile.concurrentReaderThreads.coerceAtMost(4).coerceAtLeast(2)
+                constrainedMode -> state.profile.concurrentReaderThreads.coerceAtMost(6).coerceAtLeast(3)
+                else -> state.profile.concurrentReaderThreads
             }
-            val writesPerCoroutine = if (serialExecutorMode) {
-                state.profile.concurrentWritesPerThread.coerceAtMost(30).coerceAtLeast(20)
-            } else {
-                state.profile.concurrentWritesPerThread
+            val writesPerCoroutine = when {
+                writeConstrainedMode -> state.profile.concurrentWritesPerThread.coerceAtMost(40).coerceAtLeast(24)
+                constrainedMode -> state.profile.concurrentWritesPerThread.coerceAtMost(70).coerceAtLeast(40)
+                else -> state.profile.concurrentWritesPerThread
             }
-            val readLoops = if (serialExecutorMode) {
-                state.profile.concurrentReadLoops.coerceAtMost(25).coerceAtLeast(15)
-            } else {
-                state.profile.concurrentReadLoops
+            val readLoops = when {
+                readConstrainedMode -> state.profile.concurrentReadLoops.coerceAtMost(60).coerceAtLeast(30)
+                constrainedMode -> state.profile.concurrentReadLoops.coerceAtMost(90).coerceAtLeast(45)
+                else -> state.profile.concurrentReadLoops
             }
             val writerBatchSize = when {
                 writesPerCoroutine >= 100 -> 20
@@ -1166,7 +1169,11 @@ object StartupStabilityTestRunner {
             val readerProgressStep = (readLoops / 5).coerceAtLeast(1)
             val expectedReads = readerCoroutines * readLoops
             val totalTimeoutMs = 30_000L
-            val stallTimeoutMs = 10_000L
+            val stallTimeoutMs = when {
+                writeConstrainedMode -> 18_000L
+                constrainedMode -> 14_000L
+                else -> 10_000L
+            }
             val errors = ConcurrentLinkedQueue<Throwable>()
             val written = AtomicInteger(0)
             val reads = AtomicInteger(0)
@@ -1183,7 +1190,7 @@ object StartupStabilityTestRunner {
                                 val firstWriteGate = kotlinx.coroutines.CompletableDeferred<Unit>()
                                 val workers = mutableListOf<kotlinx.coroutines.Deferred<Throwable?>>()
                                 state.emitProgressCheckpoint(
-                                    "concurrency_plan:writers=$writerCoroutines,readers=$readerCoroutines,writesPerWriter=$writesPerCoroutine,readsPerReader=$readLoops,batch=$writerBatchSize,serialMode=$serialExecutorMode,timeoutMs=$totalTimeoutMs"
+                                    "concurrency_plan:writers=$writerCoroutines,readers=$readerCoroutines,writesPerWriter=$writesPerCoroutine,readsPerReader=$readLoops,batch=$writerBatchSize,queryParallelism=$queryParallelism,transactionParallelism=$transactionParallelism,constrained=$constrainedMode,timeoutMs=$totalTimeoutMs"
                                 )
 
                                 repeat(writerCoroutines) { writerIndex ->
@@ -1206,7 +1213,7 @@ object StartupStabilityTestRunner {
                                                 }
                                                 if (!batch.saveAll()) {
                                                     throw IllegalStateException(
-                                                        "concurrent writer batch save failed: writer=$writerIndex, from=$offset, to=${endExclusive - 1}, serialMode=$serialExecutorMode"
+                                                        "concurrent writer batch save failed: writer=$writerIndex, from=$offset, to=${endExclusive - 1}, queryParallelism=$queryParallelism, transactionParallelism=$transactionParallelism"
                                                     )
                                                 }
                                                 val totalWritten = written.addAndGet(batch.size)
@@ -1220,7 +1227,7 @@ object StartupStabilityTestRunner {
                                                     )
                                                 }
                                                 offset = endExclusive
-                                                if (serialExecutorMode) {
+                                                if (writeConstrainedMode) {
                                                     delay(1L)
                                                 }
                                             }
@@ -1255,7 +1262,7 @@ object StartupStabilityTestRunner {
                                                         "reader_$readerIndex/${i + 1},count=$count,reads=${reads.get()}"
                                                     )
                                                 }
-                                                if (serialExecutorMode) {
+                                                if (readConstrainedMode) {
                                                     delay(4L)
                                                 }
                                             }
@@ -1270,7 +1277,7 @@ object StartupStabilityTestRunner {
                                         val idleMs = System.currentTimeMillis() - lastProgressEpoch.get()
                                         if (idleMs > stallTimeoutMs) {
                                             throw IllegalStateException(
-                                                "concurrent run stalled: idle=${idleMs}ms, written=${written.get()}, reads=${reads.get()}, activeWriters=${activeWriters.get()}, writers=$writerCoroutines, readers=$readerCoroutines, batch=$writerBatchSize, serialMode=$serialExecutorMode"
+                                                "concurrent run stalled: idle=${idleMs}ms, written=${written.get()}, reads=${reads.get()}, activeWriters=${activeWriters.get()}, writers=$writerCoroutines, readers=$readerCoroutines, batch=$writerBatchSize, queryParallelism=$queryParallelism, transactionParallelism=$transactionParallelism, constrained=$constrainedMode"
                                             )
                                         }
                                         state.emitProgressCheckpoint(
@@ -1297,7 +1304,7 @@ object StartupStabilityTestRunner {
                 }
             } catch (timeout: TimeoutCancellationException) {
                 throw IllegalStateException(
-                    "concurrent run timeout after ${totalTimeoutMs}ms: written=${written.get()}, reads=${reads.get()}, activeWriters=${activeWriters.get()}, writers=$writerCoroutines, readers=$readerCoroutines, writesPerWriter=$writesPerCoroutine, readLoops=$readLoops, serialMode=$serialExecutorMode",
+                    "concurrent run timeout after ${totalTimeoutMs}ms: written=${written.get()}, reads=${reads.get()}, activeWriters=${activeWriters.get()}, writers=$writerCoroutines, readers=$readerCoroutines, writesPerWriter=$writesPerCoroutine, readLoops=$readLoops, queryParallelism=$queryParallelism, transactionParallelism=$transactionParallelism, constrained=$constrainedMode",
                     timeout
                 )
             }
@@ -1330,6 +1337,16 @@ object StartupStabilityTestRunner {
             return className.contains("FinalizableDelegatedExecutorService", ignoreCase = false) ||
                 className.contains("DelegatedExecutorService", ignoreCase = false) ||
                 className.contains("SingleThread", ignoreCase = true)
+        }
+
+        private fun resolveExecutorParallelism(executor: Executor?): Int {
+            if (executor == null) {
+                return 2
+            }
+            if (executor is ThreadPoolExecutor) {
+                return executor.maximumPoolSize.coerceAtLeast(1)
+            }
+            return if (isLikelySingleThreadExecutor(executor)) 1 else 2
         }
 
         private fun cleanupByPrefix() {
