@@ -114,6 +114,8 @@ LitePal Pro 是一个 Kotlin-first 的 Android SQLite ORM。
 - `beginTransaction` 持有读锁并绑定线程上下文（支持嵌套深度）。
 - `endTransaction` 保证收口并释放锁，避免泄露。
 - 查询/写入 API 为同步语义，但可通过 `LitePalRuntimeOptions` 将执行派发到 query/transaction executor。
+- `sample/sample-test` 默认策略为：`queryExecutor=FixedThreadPool(2~4)`，`transactionExecutor=SingleThreadExecutor`；协程负责生命周期编排，数据库并行度由执行器决定。
+- `LitePalOpenHelper.onConfigure` 默认开启 `ForeignKey` 与 `WAL`（失败降级 warning），用于提升读写并发吞吐与一致性。
 
 #### 4.6 多数据库切换与 epoch 一致性
 - `LitePal.use(...) / useDefault()` 在写锁区切换配置并递增 `dbConfigEpoch`。
@@ -134,38 +136,38 @@ LitePal Pro 是一个 Kotlin-first 的 Android SQLite ORM。
 5. 支持取消与重跑：取消后保留已完成 Case，未开始 Case 保持 pending，并按 `runId` 进入历史环形缓冲。
 6. 异常路径保留完整 `stackTrace` 与 `rootCauseChain`，UI 与日志可双向追溯。
 
-#### 4.9 Sample 启动稳定性耗时快照（2026-04-06）
+#### 4.9 Sample 启动稳定性耗时快照（2026-04-07）
 - 统计口径：仅纳入 `totalCases=11 && passed=11 && failed=0 && cancelled=false` 的完整成功 run。
 - 日志来源：`sample-test/build/outputs/androidTest-results/connected/debug`。
 - 统计脚本：`python tools/startup_stability_timing_stats.py --input sample-test/build/outputs/androidTest-results/connected/debug --run-id latest_success`。
-- 采样 runId：`8cf78d9e-ecd4-44d5-98f5-2bfda053126f`。
+- 采样 runId：`624df5a7-f314-4b21-8d9f-7c65c0f193c2`。
 
 ##### 4.9.1 各 Case 平均耗时（ms）
 | Case | 平均耗时(ms) |
 | --- | ---: |
-| save_association_basic | 4 |
-| query_aggregate_basic | 4 |
-| update_delete_basic | 3 |
-| transaction_commit_basic | 1 |
+| save_association_basic | 3 |
+| query_aggregate_basic | 2 |
+| update_delete_basic | 2 |
+| transaction_commit_basic | 0 |
 | transaction_rollback_basic | 1 |
-| stress_bulk_insert_query | 136 |
-| stress_bulk_update_delete | 90 |
-| stress_association_high_volume | 654 |
-| stress_transaction_repeat | 92 |
-| stress_unique_conflict_rollback | 14 |
-| stress_concurrent_read_write | 225 |
+| stress_bulk_insert_query | 103 |
+| stress_bulk_update_delete | 77 |
+| stress_association_high_volume | 632 |
+| stress_transaction_repeat | 55 |
+| stress_unique_conflict_rollback | 16 |
+| stress_concurrent_read_write | 212 |
 
 ##### 4.9.2 核心方法平均耗时（ms）
 | 检查点 | 对应核心方法 | 平均耗时(ms) |
 | --- | --- | ---: |
-| save_songs | LitePal.saveAll（关联 songs 批量写入） | 482 |
-| concurrent_run | 并发读写混合执行流 | 214 |
-| save_albums | LitePal.saveAll（关联 albums 批量写入） | 89 |
-| bulk_save | LitePal.saveAll（批量插入） | 73 |
-| save_singers | LitePal.saveAll（关联 singers 批量写入） | 16 |
-| bulk_count | LitePal.count（批量校验） | 4 |
+| save_songs | LitePal.saveAll（关联 songs 批量写入） | 481 |
+| concurrent_run | 并发读写混合执行流 | 207 |
+| save_albums | LitePal.saveAll（关联 albums 批量写入） | 84 |
+| bulk_save | LitePal.saveAll（批量插入） | 61 |
+| save_singers | LitePal.saveAll（关联 singers 批量写入） | 7 |
+| bulk_count | LitePal.count（批量校验） | 1 |
 | load_album_eager | LitePal.find（eager 关联加载） | 1 |
-| save_conflict_batch | LitePal.saveAll（冲突回滚路径） | 1 |
+| save_conflict_batch | LitePal.saveAll（冲突回滚路径） | 2 |
 
 ### 5. 核心原理（Core Principles，中文）
 
@@ -307,8 +309,22 @@ import org.litepal.LitePalRuntimeOptions
 import org.litepal.MainThreadViolationPolicy
 import org.litepal.SchemaValidationMode
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 class MyApplication : Application() {
+    companion object {
+        private val queryCounter = AtomicInteger(0)
+        private val transactionCounter = AtomicInteger(0)
+        private val queryThreadCount = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+    }
+
+    private val queryExecutor = Executors.newFixedThreadPool(queryThreadCount) { runnable ->
+        Thread(runnable, "litepal-sample-query-${queryCounter.incrementAndGet()}").apply { isDaemon = true }
+    }
+    private val transactionExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "litepal-sample-transaction-${transactionCounter.incrementAndGet()}").apply { isDaemon = true }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -318,8 +334,8 @@ class MyApplication : Application() {
             LitePalRuntimeOptions(
                 allowMainThreadAccess = false,
                 mainThreadViolationPolicy = MainThreadViolationPolicy.THROW,
-                queryExecutor = Executors.newSingleThreadExecutor(),
-                transactionExecutor = Executors.newSingleThreadExecutor(),
+                queryExecutor = queryExecutor,
+                transactionExecutor = transactionExecutor,
                 schemaValidationMode = SchemaValidationMode.STRICT
             )
         )
@@ -645,6 +661,8 @@ In the 4.x line, the architecture is intentionally **generated-metadata-first**:
 - Global fairness lock: `ReentrantReadWriteLock` (`DatabaseRuntimeLock`).
 - Transaction context is thread-bound and supports nesting depth.
 - APIs are synchronous in semantics; execution can still be routed by runtime executors.
+- `sample/sample-test` now use `queryExecutor=FixedThreadPool(2~4)` + `transactionExecutor=SingleThreadExecutor`; coroutines orchestrate lifecycle while DB parallelism is controlled by executors.
+- `LitePalOpenHelper.onConfigure` enables foreign keys and WAL by default (falls back with warning on unsupported devices).
 
 #### 4.6 Multi-DB and Epoch Consistency
 - `LitePal.use(...) / useDefault()` updates config under write lock and increments epoch.
@@ -663,38 +681,38 @@ In the 4.x line, the architecture is intentionally **generated-metadata-first**:
 5. Cancel/re-run semantics preserve completed results, keep unstarted cases as pending, and isolate history by `runId`.
 6. Failure paths persist full `stackTrace` + `rootCauseChain` for UI/log traceability.
 
-#### 4.9 Sample Startup Timing Snapshot (2026-04-06)
+#### 4.9 Sample Startup Timing Snapshot (2026-04-07)
 - Scope: only runs with `totalCases=11 && passed=11 && failed=0 && cancelled=false`.
 - Log source: `sample-test/build/outputs/androidTest-results/connected/debug`.
 - Script: `python tools/startup_stability_timing_stats.py --input sample-test/build/outputs/androidTest-results/connected/debug --run-id latest_success`.
-- Sample runId: `8cf78d9e-ecd4-44d5-98f5-2bfda053126f`.
+- Sample runId: `624df5a7-f314-4b21-8d9f-7c65c0f193c2`.
 
 ##### 4.9.1 Case Average Cost (ms)
 | Case | Avg(ms) |
 | --- | ---: |
-| save_association_basic | 4 |
-| query_aggregate_basic | 4 |
-| update_delete_basic | 3 |
-| transaction_commit_basic | 1 |
+| save_association_basic | 3 |
+| query_aggregate_basic | 2 |
+| update_delete_basic | 2 |
+| transaction_commit_basic | 0 |
 | transaction_rollback_basic | 1 |
-| stress_bulk_insert_query | 136 |
-| stress_bulk_update_delete | 90 |
-| stress_association_high_volume | 654 |
-| stress_transaction_repeat | 92 |
-| stress_unique_conflict_rollback | 14 |
-| stress_concurrent_read_write | 225 |
+| stress_bulk_insert_query | 103 |
+| stress_bulk_update_delete | 77 |
+| stress_association_high_volume | 632 |
+| stress_transaction_repeat | 55 |
+| stress_unique_conflict_rollback | 16 |
+| stress_concurrent_read_write | 212 |
 
 ##### 4.9.2 Core Method Average Cost (ms)
 | Checkpoint | Core Method | Avg(ms) |
 | --- | --- | ---: |
-| save_songs | LitePal.saveAll (association songs batch) | 482 |
-| concurrent_run | Concurrent mixed read/write flow | 214 |
-| save_albums | LitePal.saveAll (association albums batch) | 89 |
-| bulk_save | LitePal.saveAll (bulk insert) | 73 |
-| save_singers | LitePal.saveAll (association singers batch) | 16 |
-| bulk_count | LitePal.count (bulk verification) | 4 |
+| save_songs | LitePal.saveAll (association songs batch) | 481 |
+| concurrent_run | Concurrent mixed read/write flow | 207 |
+| save_albums | LitePal.saveAll (association albums batch) | 84 |
+| bulk_save | LitePal.saveAll (bulk insert) | 61 |
+| save_singers | LitePal.saveAll (association singers batch) | 7 |
+| bulk_count | LitePal.count (bulk verification) | 1 |
 | load_album_eager | LitePal.find (eager relation load) | 1 |
-| save_conflict_batch | LitePal.saveAll (conflict rollback path) | 1 |
+| save_conflict_batch | LitePal.saveAll (conflict rollback path) | 2 |
 
 ### 5. Core Principles (English)
 
@@ -787,7 +805,7 @@ LitePal.setRuntimeOptions(
     LitePalRuntimeOptions(
         allowMainThreadAccess = false,
         mainThreadViolationPolicy = MainThreadViolationPolicy.THROW,
-        queryExecutor = Executors.newSingleThreadExecutor(),
+        queryExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors().coerceIn(2, 4)),
         transactionExecutor = Executors.newSingleThreadExecutor(),
         schemaValidationMode = SchemaValidationMode.STRICT
     )

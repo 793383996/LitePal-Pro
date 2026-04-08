@@ -59,15 +59,28 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Core compile, lint, parity, unit tests, publish dry-run
+      - name: Core compile, parity, unit tests
         run: |
           ./gradlew \
             :compiler-common:test \
             :core:assembleDebug \
-            :core:lint \
             :core:testDebugUnitTest \
             verifyGeneratedOnlyRuntimeGuards \
             verifyKspKaptGeneratedParity \
             verifyProcessorNegativeCases \
+            --no-daemon \
+            --stacktrace
+
+      - name: Core lint (isolated Gradle session to avoid metaspace accumulation)
+        run: |
+          ./gradlew \
+            :core:lint \
+            --no-daemon \
+            --stacktrace
+
+      - name: Core publish dry-run (isolated Gradle session to avoid metaspace accumulation)
+        run: |
+          ./gradlew \
             :core:publishReleasePublicationToMavenLocal \
+            --no-daemon \
             --stacktrace
